@@ -1,0 +1,140 @@
+{
+  "players": {
+    "watr": {
+      "tag": "watr",
+      "team": "",
+      "topPlayer": false,
+      "captain": false
+    },
+    "echo": {
+      "tag": "echo",
+      "team": "",
+      "topPlayer": false,
+      "captain": false
+    },
+    "kachow kachigga": {
+      "tag": "kachow kachigga",
+      "team": "",
+      "topPlayer": false,
+      "captain": false
+    },
+    "vope": {
+      "tag": "vope",
+      "team": "",
+      "topPlayer": false,
+      "captain": false
+    },
+    "linc.inc": {
+      "tag": "linc.inc",
+      "team": "",
+      "topPlayer": false,
+      "captain": false
+    },
+    "varixah": {
+      "tag": "varixah",
+      "team": "",
+      "topPlayer": false,
+      "captain": false
+    },
+    "mr.hampter": {
+      "tag": "mr.hampter",
+      "team": "Orange Chickens",
+      "topPlayer": false,
+      "captain": false
+    },
+    "millard": {
+      "tag": "millard",
+      "team": "",
+      "topPlayer": false,
+      "captain": false
+    },
+    "jace": {
+      "tag": "jace",
+      "team": "",
+      "topPlayer": false,
+      "captain": false
+    },
+    "khyizer": {
+      "tag": "khyizer",
+      "team": "",
+      "topPlayer": false,
+      "captain": false
+    },
+    "druul": {
+      "tag": "druul",
+      "team": "",
+      "topPlayer": false,
+      "captain": false
+    },
+    "golph": {
+      "tag": "GOLPH",
+      "team": "",
+      "topPlayer": false,
+      "captain": false
+    },
+    "isle": {
+      "tag": "isle",
+      "team": "Crimson Kitties",
+      "topPlayer": false,
+      "captain": false
+    },
+    "zs17": {
+      "tag": "zs17",
+      "team": "",
+      "topPlayer": false,
+      "captain": false
+    },
+    "nodeino": {
+      "tag": "nodeino",
+      "team": "Crimson Kitties",
+      "topPlayer": false,
+      "captain": true
+    },
+    "jk": {
+      "tag": "jk",
+      "team": "Snowmen",
+      "topPlayer": false,
+      "captain": false
+    },
+    "mb": {
+      "tag": "mb",
+      "team": "Crimson Kitties",
+      "topPlayer": false,
+      "captain": false
+    },
+    "juno!": {
+      "tag": "Juno!",
+      "team": "Fuchsia Frogs",
+      "topPlayer": false,
+      "captain": false
+    },
+    "pk": {
+      "tag": "pk",
+      "team": "",
+      "topPlayer": true,
+      "captain": false
+    }
+  },
+  "teams": {
+    "fuchsia frogs": {
+      "name": "Fuchsia Frogs",
+      "points": 0
+    },
+    "crimson kitties": {
+      "name": "Crimson Kitties",
+      "points": 5
+    },
+    "orange chickens": {
+      "name": "Orange Chickens",
+      "points": 0
+    },
+    "snowmen": {
+      "name": "Snowmen",
+      "points": 0
+    },
+    "red robins": {
+      "name": "red robins",
+      "points": 0
+    }
+  }
+}
