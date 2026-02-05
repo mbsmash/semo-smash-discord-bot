@@ -77,16 +77,17 @@ The bot uses Discord slash commands only in Discord. Message commands are suppor
 - `/player add [playerName]`
 - `/player assign [playerName]` (optional `[teamName]`; otherwise balanced auto-assign)
 - `/player manage [playerName]`
+- `/player list`
 
 ### Team commands
 
-- `/teams add [teamName]`
-- `/teams manage [teamName]`
-
-Alias:
-
 - `/team add [teamName]`
 - `/team manage [teamName]`
+
+### Teams view
+
+- `/teams` (embeds every team with score + roster)
+  - `/player list` shows up to 10 players per page with Next/Previous/Close buttons.
 
 
 ## Data storage

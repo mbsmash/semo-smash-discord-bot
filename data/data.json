@@ -2,37 +2,37 @@
   "players": {
     "watr": {
       "tag": "watr",
-      "team": "",
-      "topPlayer": false,
+      "team": "Crimson Kitties",
+      "topPlayer": true,
       "captain": false
     },
     "echo": {
       "tag": "echo",
-      "team": "",
+      "team": "Crimson Kitties",
       "topPlayer": false,
-      "captain": false
+      "captain": true
     },
     "kachow kachigga": {
       "tag": "kachow kachigga",
-      "team": "",
+      "team": "Crimson Kitties",
       "topPlayer": false,
       "captain": false
     },
     "vope": {
       "tag": "vope",
-      "team": "",
+      "team": "Fuchsia Frogs",
       "topPlayer": false,
       "captain": false
     },
     "linc.inc": {
       "tag": "linc.inc",
-      "team": "",
+      "team": "Fuchsia Frogs",
       "topPlayer": false,
       "captain": false
     },
     "varixah": {
       "tag": "varixah",
-      "team": "",
+      "team": "Fuchsia Frogs",
       "topPlayer": false,
       "captain": false
     },
@@ -44,7 +44,7 @@
     },
     "millard": {
       "tag": "millard",
-      "team": "",
+      "team": "Orange Chickens",
       "topPlayer": false,
       "captain": false
     },
@@ -56,9 +56,9 @@
     },
     "khyizer": {
       "tag": "khyizer",
-      "team": "",
+      "team": "Crimson Kitties",
       "topPlayer": false,
-      "captain": false
+      "captain": true
     },
     "druul": {
       "tag": "druul",
@@ -68,37 +68,37 @@
     },
     "golph": {
       "tag": "GOLPH",
-      "team": "",
+      "team": "Crimson Kitties",
       "topPlayer": false,
       "captain": false
     },
     "isle": {
       "tag": "isle",
-      "team": "Crimson Kitties",
+      "team": "",
       "topPlayer": false,
       "captain": false
     },
     "zs17": {
       "tag": "zs17",
-      "team": "",
+      "team": "Fuchsia Frogs",
       "topPlayer": false,
       "captain": false
     },
     "nodeino": {
       "tag": "nodeino",
-      "team": "Crimson Kitties",
+      "team": "Fuchsia Frogs",
       "topPlayer": false,
       "captain": true
     },
     "jk": {
       "tag": "jk",
-      "team": "Snowmen",
+      "team": "",
       "topPlayer": false,
       "captain": false
     },
     "mb": {
       "tag": "mb",
-      "team": "Crimson Kitties",
+      "team": "Orange Chickens",
       "topPlayer": false,
       "captain": false
     },
@@ -112,6 +112,96 @@
       "tag": "pk",
       "team": "",
       "topPlayer": true,
+      "captain": true
+    },
+    "morly!": {
+      "tag": "morly!",
+      "team": "",
+      "topPlayer": true,
+      "captain": false
+    },
+    "ahanu": {
+      "tag": "Ahanu",
+      "team": "Crimson Kitties",
+      "topPlayer": false,
+      "captain": false
+    },
+    "hypethetic": {
+      "tag": "Hypethetic",
+      "team": "Crimson Kitties",
+      "topPlayer": false,
+      "captain": false
+    },
+    "peep": {
+      "tag": "PeeP",
+      "team": "Crimson Kitties",
+      "topPlayer": false,
+      "captain": false
+    },
+    "zer0shadow": {
+      "tag": "ZER0SHaDoW",
+      "team": "Crimson Kitties",
+      "topPlayer": false,
+      "captain": false
+    },
+    "ethereal": {
+      "tag": "ethereal",
+      "team": "Orange Chickens",
+      "topPlayer": false,
+      "captain": false
+    },
+    "hyper": {
+      "tag": "Hyper",
+      "team": "Orange Chickens",
+      "topPlayer": false,
+      "captain": false
+    },
+    "nightshade63": {
+      "tag": "nightshade63",
+      "team": "Orange Chickens",
+      "topPlayer": false,
+      "captain": false
+    },
+    "phizzuk": {
+      "tag": "Phizzuk",
+      "team": "Orange Chickens",
+      "topPlayer": false,
+      "captain": false
+    },
+    "reiko": {
+      "tag": "Reiko",
+      "team": "Orange Chickens",
+      "topPlayer": false,
+      "captain": false
+    },
+    "superdogtrixie": {
+      "tag": "SuperDogTrixie",
+      "team": "Orange Chickens",
+      "topPlayer": false,
+      "captain": false
+    },
+    "craylord2000": {
+      "tag": "Craylord2000",
+      "team": "Fuchsia Frogs",
+      "topPlayer": false,
+      "captain": false
+    },
+    "incinmori": {
+      "tag": "IncinMori",
+      "team": "Fuchsia Frogs",
+      "topPlayer": false,
+      "captain": false
+    },
+    "xpression": {
+      "tag": "Xpression",
+      "team": "Fuchsia Frogs",
+      "topPlayer": false,
+      "captain": false
+    },
+    "gamma": {
+      "tag": "Gamma",
+      "team": "red robins",
+      "topPlayer": false,
       "captain": false
     }
   },
@@ -126,10 +216,6 @@
     },
     "orange chickens": {
       "name": "Orange Chickens",
-      "points": 0
-    },
-    "snowmen": {
-      "name": "Snowmen",
       "points": 0
     },
     "red robins": {

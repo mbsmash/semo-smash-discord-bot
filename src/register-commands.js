@@ -42,9 +42,12 @@ const commands = [
         .addStringOption((opt) =>
           opt.setName("team").setDescription("Target team (optional)")
         )
+    )
+    .addSubcommand((sub) =>
+      sub.setName("list").setDescription("List registered players")
     ),
   new SlashCommandBuilder()
-    .setName("teams")
+    .setName("team")
     .setDescription("Manage teams")
     .addSubcommand((sub) =>
       sub
@@ -63,24 +66,8 @@ const commands = [
         )
     ),
   new SlashCommandBuilder()
-    .setName("team")
-    .setDescription("Team alias")
-    .addSubcommand((sub) =>
-      sub
-        .setName("add")
-        .setDescription("Add a team")
-        .addStringOption((opt) =>
-          opt.setName("name").setDescription("Team name").setRequired(true)
-        )
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("manage")
-        .setDescription("Show team details")
-        .addStringOption((opt) =>
-          opt.setName("name").setDescription("Team name").setRequired(false)
-        )
-    )
+    .setName("teams")
+    .setDescription("View teams list")
 ].map((command) => command.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(token);

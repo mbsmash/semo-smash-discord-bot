@@ -20,6 +20,7 @@ dotenv.config();
 
 const COMMAND_PREFIXES = ["!", "/"];
 const DATA_PATH = path.resolve("data", "data.json");
+const PAGE_SIZE = 10;
 
 function normalizeName(value) {
   return value.trim().toLowerCase();
@@ -205,6 +206,24 @@ function buildPlayerEmbed(player) {
     .setColor(0x3b82f6);
 }
 
+function buildPlayerAddEmbed(player) {
+  return new EmbedBuilder()
+    .setTitle(`${player.tag} added`)
+    .setDescription(`${player.tag} added. Please select any additional player information below.`)
+    .setColor(0x3b82f6);
+}
+
+function buildPlayerAddComponents(player) {
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`playerAdd:top:${normalizeName(player.tag)}`)
+      .setLabel(player.topPlayer ? "Top Player (set)" : "Top Player")
+      .setStyle(player.topPlayer ? ButtonStyle.Success : ButtonStyle.Secondary)
+  );
+
+  return [row];
+}
+
 function buildTeamEmbed(team, data) {
   const players = Object.values(data.players).filter(
     (player) => player.team && normalizeName(player.team) === normalizeName(team.name)
@@ -227,6 +246,80 @@ function buildTeamEmbed(team, data) {
 function buildListEmbed(title, lines, emptyMessage) {
   const description = lines.length ? lines.join("\n") : emptyMessage;
   return new EmbedBuilder().setTitle(title).setDescription(description).setColor(0x6366f1);
+}
+
+function buildTeamsListEmbed(data) {
+  const teams = Object.values(data.teams).sort((a, b) =>
+    a.name.localeCompare(b.name, "en", { sensitivity: "base" })
+  );
+
+  if (!teams.length) {
+    return new EmbedBuilder()
+      .setTitle("Teams")
+      .setDescription("No teams yet. Add one with `/team add`.")
+      .setColor(0x22c55e);
+  }
+
+  const description = teams
+    .map((team) => {
+      const players = Object.values(data.players)
+        .filter((player) => player.team && normalizeName(player.team) === normalizeName(team.name))
+        .map((player) => player.tag);
+      const members = players.length ? players.join(", ") : "None yet";
+      return `**${team.name}** — ${team.points ?? 0} pts\nPlayers: ${members}`;
+    })
+    .join("\n\n");
+
+  return new EmbedBuilder().setTitle("Teams").setDescription(description).setColor(0x22c55e);
+}
+
+function buildPlayerListEmbed(players, page) {
+  if (!players.length) {
+    return new EmbedBuilder()
+      .setTitle("Players")
+      .setDescription("No players registered yet.")
+      .setColor(0x3b82f6);
+  }
+
+  const totalPages = Math.max(1, Math.ceil(players.length / PAGE_SIZE));
+  const currentPage = Math.min(Math.max(page, 0), totalPages - 1);
+  const start = currentPage * PAGE_SIZE;
+  const slice = players.slice(start, start + PAGE_SIZE);
+
+  const lines = slice.map((player) => {
+    const badges = `${player.captain ? "👑" : ""}${player.topPlayer ? "⭐" : ""}`;
+    const teamLabel = player.team ? player.team : "Unassigned";
+    return `${badges ? `${badges} ` : ""}${player.tag} — ${teamLabel}`;
+  });
+
+  return new EmbedBuilder()
+    .setTitle("Players")
+    .setDescription(`${lines.join("\n")}\n\nPage ${currentPage + 1} of ${totalPages}`)
+    .setColor(0x3b82f6);
+}
+
+function buildPlayerListComponents(page, totalPages) {
+  const prevDisabled = page <= 0;
+  const nextDisabled = page >= totalPages - 1;
+
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`playerList:nav:prev:${page}`)
+        .setLabel("Previous")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(prevDisabled),
+      new ButtonBuilder()
+        .setCustomId(`playerList:nav:next:${page}`)
+        .setLabel("Next")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(nextDisabled),
+      new ButtonBuilder()
+        .setCustomId(`playerList:nav:close:${page}`)
+        .setLabel("Close")
+        .setStyle(ButtonStyle.Danger)
+    )
+  ];
 }
 
 
@@ -1017,7 +1110,11 @@ function handleMessageContent(content) {
     return handlePlayerCommand(command.action, command.args, data);
   }
 
-  if (command.root === "teams" || command.root === "team") {
+  if (command.root === "teams" && !command.action) {
+    return formatTeamList(data);
+  }
+
+  if (command.root === "team" || (command.root === "teams" && command.action)) {
     return handleTeamCommand(command.action, command.args, data);
   }
 
@@ -1033,9 +1130,20 @@ function handleSlashCommand(interaction) {
     const args = [];
 
     if (sub === "add") {
-      args.push(interaction.options.getString("name", true));
+      const name = interaction.options.getString("name", true);
+      args.push(name);
       const message = handlePlayerCommand(sub, args, data);
-      return { embeds: [new EmbedBuilder().setTitle(message).setColor(0x3b82f6)] };
+      if (message.startsWith("Added player")) {
+        const player = getPlayerByName(data, name);
+        if (!player) {
+          return { embeds: [new EmbedBuilder().setTitle(message).setColor(0x3b82f6)] };
+        }
+        return {
+          embeds: [buildPlayerAddEmbed(player)],
+          components: buildPlayerAddComponents(player)
+        };
+      }
+      return { embeds: [new EmbedBuilder().setTitle(message).setColor(0xef4444)] };
     } else if (sub === "assign") {
       const name = interaction.options.getString("name", true);
       const team = interaction.options.getString("team", false);
@@ -1056,10 +1164,18 @@ function handleSlashCommand(interaction) {
         embeds: [buildPlayerEmbed(player)],
         components: buildPlayerManageComponents(player)
       };
+    } else if (sub === "list") {
+      const players = Object.values(data.players).sort((a, b) =>
+        a.tag.localeCompare(b.tag, "en", { sensitivity: "base" })
+      );
+      const totalPages = Math.max(1, Math.ceil(players.length / PAGE_SIZE));
+      const embed = buildPlayerListEmbed(players, 0);
+      const components = players.length ? buildPlayerListComponents(0, totalPages) : [];
+      return { embeds: [embed], components };
     }
   }
 
-  if (commandName === "teams" || commandName === "team") {
+  if (commandName === "team") {
     const sub = interaction.options.getSubcommand();
     const args = [];
     let action = sub;
@@ -1087,6 +1203,10 @@ function handleSlashCommand(interaction) {
     }
   }
 
+  if (commandName === "teams") {
+    return { embeds: [buildTeamsListEmbed(data)] };
+  }
+
   return { embeds: [new EmbedBuilder().setTitle("Unknown command.").setColor(0xef4444)] };
 }
 
@@ -1112,6 +1232,53 @@ async function handleComponentInteraction(interaction) {
 
   const data = loadData();
   const [scope, action, key, extra] = interaction.customId.split(":");
+
+  if (scope === "playerList") {
+    const players = Object.values(data.players).sort((a, b) =>
+      a.tag.localeCompare(b.tag, "en", { sensitivity: "base" })
+    );
+    const totalPages = Math.max(1, Math.ceil(players.length / PAGE_SIZE));
+    const direction = key;
+    const page = Number(extra ?? 0);
+
+    if (direction === "close") {
+      await interaction.message.delete();
+      await interaction.deleteReply().catch(() => {});
+      return;
+    }
+
+    let newPage = page;
+    if (direction === "next") {
+      newPage = Math.min(totalPages - 1, page + 1);
+    } else if (direction === "prev") {
+      newPage = Math.max(0, page - 1);
+    }
+
+    const embed = buildPlayerListEmbed(players, newPage);
+    const components = players.length ? buildPlayerListComponents(newPage, totalPages) : [];
+    await updateMessage({ embeds: [embed], components });
+    return;
+  }
+
+  if (scope === "playerAdd") {
+    const player = data.players[key];
+    if (!player) {
+      await replyEphemeral({
+        embeds: [new EmbedBuilder().setTitle("Player not found.").setColor(0xef4444)]
+      });
+      return;
+    }
+
+    if (action === "top") {
+      player.topPlayer = !player.topPlayer;
+      saveData(data);
+      await updateMessage({
+        embeds: [buildPlayerAddEmbed(player)],
+        components: buildPlayerAddComponents(player)
+      });
+    }
+    return;
+  }
 
   if (scope === "player") {
     const player = data.players[key];
