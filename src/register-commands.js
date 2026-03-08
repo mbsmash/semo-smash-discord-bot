@@ -67,7 +67,88 @@ const commands = [
     ),
   new SlashCommandBuilder()
     .setName("teams")
-    .setDescription("View teams list")
+    .setDescription("View teams list"),
+  new SlashCommandBuilder()
+    .setName("scores")
+    .setDescription("Add or remove points")
+    .addSubcommand((sub) => sub.setName("add").setDescription("Add points"))
+    .addSubcommand((sub) => sub.setName("remove").setDescription("Remove points")),
+  new SlashCommandBuilder()
+    .setName("points")
+    .setDescription("View current scores"),
+  new SlashCommandBuilder()
+    .setName("events")
+    .setDescription("Manage and publish upcoming community events")
+    .addSubcommand((sub) =>
+      sub
+        .setName("add")
+        .setDescription("Open a modal to add an event")
+        .addStringOption((opt) =>
+          opt
+            .setName("startgg_url")
+            .setDescription("Optional start.gg URL or short slug to auto-import details")
+            .setRequired(false)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("edit")
+        .setDescription("Edit an existing event")
+        .addStringOption((opt) => opt.setName("id").setDescription("Event ID").setRequired(true))
+        .addStringOption((opt) => opt.setName("name").setDescription("Event name"))
+        .addStringOption((opt) => opt.setName("date").setDescription("Date (YYYY-MM-DD)"))
+        .addStringOption((opt) =>
+          opt
+            .setName("region")
+            .setDescription("Region for color-coding")
+            .addChoices(
+              { name: "SEMO", value: "semo" },
+              { name: "Rolla", value: "rolla" },
+              { name: "St. Louis", value: "stl" },
+              { name: "Kansas City", value: "kc" },
+              { name: "CoMo", value: "como" },
+              { name: "SoIL", value: "soil" },
+              { name: "Springfield", value: "springfield" },
+              { name: "WKY", value: "wky" },
+              { name: "Regional", value: "regional" },
+              { name: "Major", value: "major" }
+            )
+        )
+        .addStringOption((opt) => opt.setName("address").setDescription("Street/city/state line"))
+        .addStringOption((opt) => opt.setName("register_url").setDescription("Registration URL"))
+        .addStringOption((opt) => opt.setName("notes").setDescription("Optional notes"))
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("remove")
+        .setDescription("Remove an event")
+        .addStringOption((opt) => opt.setName("id").setDescription("Event ID").setRequired(true))
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("list")
+        .setDescription("List events for a month")
+        .addIntegerOption((opt) =>
+          opt.setName("month").setDescription("Month number (1-12)").setMinValue(1).setMaxValue(12)
+        )
+        .addIntegerOption((opt) =>
+          opt.setName("year").setDescription("Year (e.g. 2027)").setMinValue(2000).setMaxValue(2100)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("publish")
+        .setDescription("Publish or update the monthly events message in this channel")
+        .addIntegerOption((opt) =>
+          opt.setName("month").setDescription("Month number (1-12)").setMinValue(1).setMaxValue(12)
+        )
+        .addIntegerOption((opt) =>
+          opt.setName("year").setDescription("Year (e.g. 2027)").setMinValue(2000).setMaxValue(2100)
+        )
+    ),
+  new SlashCommandBuilder()
+    .setName("reset")
+    .setDescription("Reset all bot data to initial state (dev/debug)")
 ].map((command) => command.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(token);

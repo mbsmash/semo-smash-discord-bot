@@ -6,6 +6,7 @@ import {
   EmbedBuilder,
   GatewayIntentBits,
   InteractionType,
+  MessageFlags,
   ModalBuilder,
   StringSelectMenuBuilder,
   TextInputBuilder,
@@ -19,8 +20,63 @@ import path from "node:path";
 dotenv.config();
 
 const COMMAND_PREFIXES = ["!", "/"];
-const DATA_PATH = path.resolve("data", "data.json");
+const DATA_DIR = process.env.BOT_DATA_DIR
+  ? path.resolve(process.env.BOT_DATA_DIR)
+  : path.resolve("data");
+const DATA_PATH = process.env.BOT_DATA_PATH
+  ? path.resolve(process.env.BOT_DATA_PATH)
+  : path.join(DATA_DIR, "data.json");
 const PAGE_SIZE = 10;
+const scoreSessions = new Map();
+const eventAddSessions = new Map();
+const EVENT_REGION_CONFIG = Object.freeze({
+  semo: { label: "SEMO", color: 0x7a1f1f },
+  rolla: { label: "Rolla", color: 0x10b981 },
+  springfield: { label: "Springfield", color: 0xf59e0b },
+  stl: { label: "St. Louis", color: 0x2563eb },
+  kc: { label: "Kansas City", color: 0xef4444 },
+  como: { label: "CoMo", color: 0x06b6d4 },
+  soil: { label: "SoIL", color: 0x84cc16 },
+  wky: { label: "WKY", color: 0xeab308 },
+  regional: { label: "Regional", color: 0x64748b },
+  major: { label: "Major", color: 0xf97316 }
+});
+const EVENT_CATEGORY_CONFIG = Object.freeze({
+  local: { label: "SEMO Events", color: 0x7a1f1f },
+  moNearby: { label: "Missouri and Nearby Region Events", color: 0x2563eb },
+  regionalMajor: { label: "Regional/Major Events", color: 0xf97316 }
+});
+const CATEGORY_ORDER = Object.freeze(["local", "moNearby", "regionalMajor"]);
+const REGION_TO_CATEGORY = Object.freeze({
+  semo: "local",
+  stl: "moNearby",
+  kc: "moNearby",
+  rolla: "moNearby",
+  como: "moNearby",
+  soil: "moNearby",
+  springfield: "moNearby",
+  wky: "moNearby",
+  regional: "regionalMajor",
+  major: "regionalMajor"
+});
+
+function getDefaultEventRegionColors() {
+  return Object.fromEntries(
+    Object.entries(EVENT_REGION_CONFIG).map(([key, value]) => [key, value.color])
+  );
+}
+
+function createInitialData() {
+  return {
+    players: {},
+    teams: {},
+    events: {
+      items: {},
+      publishedMessages: {},
+      regionColors: getDefaultEventRegionColors()
+    }
+  };
+}
 
 function normalizeName(value) {
   return value.trim().toLowerCase();
@@ -107,28 +163,88 @@ function ensureDataDir() {
   }
 }
 
+function ensureEventsStore(data) {
+  if (!data.events || typeof data.events !== "object") {
+    data.events = {};
+  }
+  if (!data.events.items || typeof data.events.items !== "object") {
+    data.events.items = {};
+  }
+  if (!data.events.publishedMessages || typeof data.events.publishedMessages !== "object") {
+    data.events.publishedMessages = {};
+  }
+  if (!data.events.regionColors || typeof data.events.regionColors !== "object") {
+    data.events.regionColors = {};
+  }
+  if (typeof data.events.boardMessageId !== "string") {
+    data.events.boardMessageId = "";
+  }
+  if (typeof data.events.boardChannelId !== "string") {
+    data.events.boardChannelId = "";
+  }
+
+  const defaults = getDefaultEventRegionColors();
+  Object.entries(defaults).forEach(([key, color]) => {
+    if (data.events.regionColors[key] == null) {
+      data.events.regionColors[key] = color;
+    }
+  });
+
+  return data.events;
+}
+
 function loadData() {
   ensureDataDir();
   if (!fs.existsSync(DATA_PATH)) {
-    return { players: {}, teams: {} };
+    return createInitialData();
   }
 
   try {
     const raw = fs.readFileSync(DATA_PATH, "utf-8");
     const parsed = JSON.parse(raw);
-    return {
+    Object.values(parsed.players ?? {}).forEach((player) => {
+      if (player.points == null) player.points = 0;
+      if (player.topPlayer == null) player.topPlayer = false;
+      if (player.captain == null) player.captain = false;
+    });
+    const data = {
       players: parsed.players ?? {},
-      teams: parsed.teams ?? {}
+      teams: parsed.teams ?? {},
+      events: parsed.events ?? {}
     };
+    ensureEventsStore(data);
+    return data;
   } catch (err) {
     console.error("Failed to read data.json, starting fresh:", err);
-    return { players: {}, teams: {} };
+    return createInitialData();
   }
 }
 
 function saveData(data) {
   ensureDataDir();
   fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2));
+}
+
+function resetData() {
+  ensureDataDir();
+  const nextData = createInitialData();
+  const tempPath = `${DATA_PATH}.tmp`;
+
+  try {
+    fs.writeFileSync(tempPath, JSON.stringify(nextData, null, 2));
+    fs.renameSync(tempPath, DATA_PATH);
+    scoreSessions.clear();
+    return { ok: true, data: nextData };
+  } catch (err) {
+    if (fs.existsSync(tempPath)) {
+      try {
+        fs.unlinkSync(tempPath);
+      } catch {
+        // Best effort cleanup for failed reset writes.
+      }
+    }
+    return { ok: false, error: err };
+  }
 }
 
 function formatPlayer(player) {
@@ -243,6 +359,33 @@ function buildTeamEmbed(team, data) {
     .setColor(0x22c55e);
 }
 
+function buildScoresMenuEmbed() {
+  return new EmbedBuilder()
+    .setTitle("Add or remove points")
+    .setDescription("Select the team that scored and enter the details.")
+    .setColor(0xf97316);
+}
+
+function buildScoresMenuComponents(data) {
+  const teams = Object.values(data.teams).sort((a, b) =>
+    a.name.localeCompare(b.name, "en", { sensitivity: "base" })
+  );
+  if (!teams.length) return [];
+  const rows = [];
+  for (let i = 0; i < teams.length; i += 5) {
+    const slice = teams.slice(i, i + 5);
+    const row = new ActionRowBuilder().addComponents(
+      ...slice.map((team) =>
+        new ButtonBuilder()
+          .setCustomId(`scores:select:${encodeKey(normalizeName(team.name))}`)
+          .setLabel(team.name)
+          .setStyle(ButtonStyle.Primary)
+      )
+    );
+    rows.push(row);
+  }
+  return rows;
+}
 function buildListEmbed(title, lines, emptyMessage) {
   const description = lines.length ? lines.join("\n") : emptyMessage;
   return new EmbedBuilder().setTitle(title).setDescription(description).setColor(0x6366f1);
@@ -320,6 +463,641 @@ function buildPlayerListComponents(page, totalPages) {
         .setStyle(ButtonStyle.Danger)
     )
   ];
+}
+
+function buildPointsEmbed(data) {
+  const teams = Object.values(data.teams).sort((a, b) =>
+    (b.points ?? 0) - (a.points ?? 0)
+  );
+  const descriptionLines = teams.length
+    ? teams.map((team) => `**${team.name}** — ${team.points ?? 0} pts`)
+    : ["No teams yet."];
+
+  const allPlayers = Object.values(data.players).slice();
+  allPlayers.sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
+  const topPlayers = allPlayers.slice(0, 6);
+  const topLines = topPlayers.map(
+    (player) =>
+      `${player.topPlayer ? "⭐" : ""}${player.captain ? "👑" : ""} ${player.tag}: ${
+        player.points ?? 0
+      } pts`
+  );
+
+  return new EmbedBuilder()
+    .setTitle("Current Scores")
+    .setDescription(`${descriptionLines.join("\n")}\n\nTop Scorers:\n${topLines.join("\n")}`)
+    .setColor(0x22c55e);
+}
+
+function buildScoresAddEmbed(team, session, data) {
+  const pointsValue =
+    session?.points != null ? `${session.points} pts` : "Not set yet";
+  const playerValue =
+    session?.playerKey && session.playerKey !== "__team__"
+      ? data.players[session.playerKey]?.tag ?? "Unknown player"
+      : "Team (all players)";
+
+  return new EmbedBuilder()
+    .setTitle(`Adding points to ${team.name}`)
+    .setDescription(
+      [
+        `**Points:** ${pointsValue}`,
+        `**Player target:** ${playerValue}`
+      ].join("\n")
+    )
+    .setColor(0xf97316);
+}
+
+function buildScoresAddComponents(team, session, messageId, data) {
+  const players = Object.values(data.players).filter(
+    (player) => player.team && normalizeName(player.team) === normalizeName(team.name)
+  );
+  const options = players.map((player) => ({
+    label: player.tag,
+    value: normalizeName(player.tag),
+    description: player.points ? `${player.points} pts` : "No points"
+  }));
+  options.unshift({ label: "Entire team", value: "__team__", description: "Add to team score only" });
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`scores:playerSelect:${encodeKey(normalizeName(team.name))}`)
+    .setPlaceholder("Who scored the points?")
+    .addOptions(options)
+    .setMinValues(1)
+    .setMaxValues(1);
+  if (session?.playerKey) {
+    select.setDefaultOptions([
+      {
+        label: session.playerKey === "__team__" ? "Entire team" : data.players[session.playerKey]?.tag ?? "Unknown",
+        value: session.playerKey
+      }
+    ]);
+  }
+
+  return [
+    new ActionRowBuilder().addComponents(select),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`scores:pointsModal:${encodeKey(normalizeName(team.name))}:${messageId}`)
+        .setLabel("Add how many points?")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`scores:confirm:${encodeKey(normalizeName(team.name))}:${messageId}`)
+        .setLabel("Confirm")
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(!session?.points),
+      new ButtonBuilder()
+        .setCustomId(`scores:cancel:${encodeKey(normalizeName(team.name))}:${messageId}`)
+        .setLabel("Cancel")
+        .setStyle(ButtonStyle.Secondary)
+    )
+  ];
+}
+
+function createEventId() {
+  return `evt_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function parseIsoDate(value) {
+  const trimmed = value.trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+function formatEventDate(isoDate) {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return isoDate;
+  return date.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC"
+  });
+}
+
+function formatMonthLabel(monthKey) {
+  const [yearRaw, monthRaw] = monthKey.split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const date = new Date(Date.UTC(year, month - 1, 1));
+  if (Number.isNaN(date.getTime())) return monthKey;
+  return date.toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC"
+  });
+}
+
+function resolveMonthSelection(interaction) {
+  const now = new Date();
+  const month = interaction.options.getInteger("month", false) ?? now.getMonth() + 1;
+  const year = interaction.options.getInteger("year", false) ?? now.getFullYear();
+  const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+  return { month, year, monthKey, label: formatMonthLabel(monthKey) };
+}
+
+function validateRegisterUrl(value) {
+  return /^https?:\/\//i.test(value.trim());
+}
+
+function cleanAddress(value) {
+  if (!value) return "";
+  return value
+    .replace(/,\s*USA\b/gi, "")
+    .replace(/,\s*US\b/gi, "")
+    .replace(/,\s*([A-Z]{2})\s+\d{5}(?:-\d{4})?(?=,|$)/g, ", $1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function validateStartGgInput(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (/^https?:\/\//i.test(trimmed)) return true;
+  return /^[a-z0-9][a-z0-9-]*$/i.test(trimmed) || /^tournament\/[a-z0-9-]+$/i.test(trimmed);
+}
+
+function validateRegisterReference(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (validateRegisterUrl(trimmed)) return true;
+  return validateStartGgInput(trimmed);
+}
+
+function normalizeRegisterReference(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (validateRegisterUrl(trimmed)) return trimmed;
+  const normalized = trimmed.replace(/^\/+/, "");
+  if (/^tournament\/[a-z0-9-]+$/i.test(normalized)) {
+    return `https://start.gg/${normalized.toLowerCase()}`;
+  }
+  return `https://start.gg/${normalized.toLowerCase()}`;
+}
+
+function parseStartGgSlug(input) {
+  try {
+    const raw = input.trim();
+    if (!raw) return null;
+
+    if (!/^https?:\/\//i.test(raw)) {
+      const normalized = raw.replace(/^\/+/, "");
+      if (/^tournament\/[a-z0-9-]+$/i.test(normalized)) {
+        return { kind: "tournament", slug: normalized.toLowerCase() };
+      }
+      if (/^[a-z0-9][a-z0-9-]*$/i.test(normalized)) {
+        return { kind: "tournament", slug: `tournament/${normalized.toLowerCase()}` };
+      }
+      return null;
+    }
+
+    const parsed = new URL(raw);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    const tournamentIndex = parts.indexOf("tournament");
+    const eventIndex = parts.indexOf("event");
+    if (tournamentIndex === -1) return null;
+
+    const tournamentSlug = parts[tournamentIndex + 1];
+    if (!tournamentSlug) return null;
+
+    if (eventIndex !== -1) {
+      const eventSlug = parts[eventIndex + 1];
+      if (!eventSlug) return null;
+      return {
+        kind: "event",
+        slug: `tournament/${tournamentSlug}/event/${eventSlug}`
+      };
+    }
+
+    return { kind: "tournament", slug: `tournament/${tournamentSlug}` };
+  } catch {
+    return null;
+  }
+}
+
+async function importStartGgEvent(startGgUrl) {
+  const token = process.env.START_GG_API_TOKEN;
+  if (!token) {
+    return { ok: false, error: "Missing START_GG_API_TOKEN in environment." };
+  }
+
+  const parsedSlug = parseStartGgSlug(startGgUrl);
+  if (!parsedSlug) {
+    return {
+      ok: false,
+      error:
+        "Use a valid start.gg URL like /tournament/{slug} or /tournament/{slug}/event/{slug}."
+    };
+  }
+
+  const eventQuery = `
+      query EventBySlug($slug: String!) {
+        event(slug: $slug) {
+          slug
+          name
+          startAt
+          tournament {
+            slug
+            name
+            venueAddress
+            city
+            addrState
+          }
+        }
+      }
+    `;
+
+  const tournamentQuery = `
+      query TournamentBySlug($slug: String!) {
+        tournament(slug: $slug) {
+          slug
+          name
+          startAt
+          venueAddress
+          city
+          addrState
+          events {
+            name
+            startAt
+          }
+        }
+      }
+    `;
+
+  try {
+    const slugCandidates =
+      parsedSlug.kind === "tournament"
+        ? [parsedSlug.slug, parsedSlug.slug.replace(/^tournament\//i, "")]
+        : [parsedSlug.slug];
+
+    let payload = null;
+    for (const candidate of slugCandidates) {
+      const response = await fetch("https://api.start.gg/gql/alpha", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          query: parsedSlug.kind === "event" ? eventQuery : tournamentQuery,
+          variables: { slug: candidate }
+        })
+      });
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const candidatePayload = await response.json();
+      if (candidatePayload.errors?.length) {
+        continue;
+      }
+
+      if (
+        (parsedSlug.kind === "event" && candidatePayload?.data?.event) ||
+        (parsedSlug.kind === "tournament" && candidatePayload?.data?.tournament)
+      ) {
+        payload = candidatePayload;
+        break;
+      }
+    }
+
+    if (!payload) {
+      return { ok: false, error: "Tournament/event not found for that start.gg reference." };
+    }
+
+    if (parsedSlug.kind === "event") {
+      const event = payload?.data?.event;
+      if (!event) {
+        return { ok: false, error: "Event not found on start.gg." };
+      }
+
+      const date =
+        Number.isFinite(event.startAt) && event.startAt > 0
+          ? new Date(event.startAt * 1000).toISOString().slice(0, 10)
+          : "";
+      const tournament = event.tournament ?? {};
+      const fallbackAddress = [tournament.city, tournament.addrState].filter(Boolean).join(", ");
+      const address = cleanAddress(tournament.venueAddress || fallbackAddress);
+
+      return {
+        ok: true,
+        data: {
+          name: event.name ?? "",
+          date,
+          address,
+          registerUrl: normalizeRegisterReference(startGgUrl)
+        }
+      };
+    }
+
+    const tournament = payload?.data?.tournament;
+    if (!tournament) {
+      return { ok: false, error: "Tournament not found on start.gg." };
+    }
+
+    const eventsList = Array.isArray(tournament.events)
+      ? tournament.events
+      : tournament.events?.nodes ?? [];
+    const firstEvent = eventsList[0] ?? null;
+    const startAt = firstEvent?.startAt ?? tournament.startAt ?? 0;
+    const date =
+      Number.isFinite(startAt) && startAt > 0
+        ? new Date(startAt * 1000).toISOString().slice(0, 10)
+        : "";
+
+    const fallbackAddress = [tournament.city, tournament.addrState].filter(Boolean).join(", ");
+    const address = cleanAddress(tournament.venueAddress || fallbackAddress);
+
+    return {
+      ok: true,
+      data: {
+        name: tournament.name || firstEvent?.name || "",
+        date,
+        address,
+        registerUrl: normalizeRegisterReference(startGgUrl)
+      }
+    };
+  } catch (err) {
+    return { ok: false, error: err.message ?? "Failed to call start.gg API." };
+  }
+}
+
+function getRegionLabel(regionKey) {
+  return EVENT_REGION_CONFIG[regionKey]?.label ?? regionKey.toUpperCase();
+}
+
+function normalizeRegionInput(value) {
+  const raw = value.trim().toLowerCase();
+  const compact = raw.replace(/[\s.-]/g, "");
+  const aliases = {
+    semo: "semo",
+    rolla: "rolla",
+    stl: "stl",
+    stlouis: "stl",
+    kansascity: "kc",
+    kc: "kc",
+    como: "como",
+    columbia: "como",
+    springfield: "springfield",
+    spfd: "springfield",
+    soil: "soil",
+    southernillinois: "soil",
+    wky: "wky",
+    westernkentucky: "wky",
+    regional: "regional",
+    major: "major"
+  };
+  return aliases[compact] ?? null;
+}
+
+function getCategoryKeyForRegion(regionKey) {
+  return REGION_TO_CATEGORY[regionKey] ?? null;
+}
+
+function getCategoryLabel(categoryKey) {
+  return EVENT_CATEGORY_CONFIG[categoryKey]?.label ?? "Events";
+}
+
+function getCategoryColor(categoryKey) {
+  return EVENT_CATEGORY_CONFIG[categoryKey]?.color ?? 0x64748b;
+}
+
+function getRegionColor(data, regionKey) {
+  const events = ensureEventsStore(data);
+  return events.regionColors[regionKey] ?? 0x64748b;
+}
+
+function getEventsForMonth(data, monthKey) {
+  const eventsStore = ensureEventsStore(data);
+  return Object.values(eventsStore.items)
+    .filter((event) => event.date?.startsWith(`${monthKey}-`))
+    .sort((a, b) => {
+      const dateCompare = a.date.localeCompare(b.date);
+      if (dateCompare !== 0) return dateCompare;
+      return a.name.localeCompare(b.name, "en", { sensitivity: "base" });
+    });
+}
+
+function buildEventEmbed(event, data) {
+  const description = [
+    `**${event.name}**`,
+    `Region: ${getRegionLabel(event.region)}`,
+    `Date: ${formatEventDate(event.date)}`,
+    `Where: ${event.address}`,
+    `Register: ${event.registerUrl}`
+  ];
+  if (event.notes) {
+    description.push(`**Notes:** ${event.notes}`);
+  }
+
+  return new EmbedBuilder()
+    .setTitle(`${getRegionLabel(event.region)} Events`)
+    .setDescription(description.join("\n"))
+    .setColor(getRegionColor(data, event.region));
+}
+
+function buildCategorySectionEmbed(categoryKey, events) {
+  const lines = [];
+  const showRegionLine = categoryKey !== "local";
+  events.forEach((event) => {
+    lines.push(`**${event.name}**`);
+    if (showRegionLine) {
+      lines.push(`Region: ${getRegionLabel(event.region)}`);
+    }
+    lines.push(`Date: ${formatEventDate(event.date)}`);
+    lines.push(`Where: ${event.address}`);
+    lines.push(`Register: ${event.registerUrl}`);
+    lines.push("");
+  });
+
+  const description = lines.join("\n").trim() || "No events currently listed.";
+  return new EmbedBuilder()
+    .setTitle(getCategoryLabel(categoryKey))
+    .setDescription(description)
+    .setColor(getCategoryColor(categoryKey));
+}
+
+function buildCategoryBoardEmbeds(data) {
+  const eventsStore = ensureEventsStore(data);
+  const events = Object.values(eventsStore.items).sort((a, b) => {
+    const dateCompare = a.date.localeCompare(b.date);
+    if (dateCompare !== 0) return dateCompare;
+    return a.name.localeCompare(b.name, "en", { sensitivity: "base" });
+  });
+
+  const grouped = new Map();
+  events.forEach((event) => {
+    const regionKey = normalizeRegionInput(event.region ?? "");
+    const categoryKey = regionKey ? getCategoryKeyForRegion(regionKey) : null;
+    if (!categoryKey) return;
+    const current = grouped.get(categoryKey) ?? [];
+    current.push(event);
+    grouped.set(categoryKey, current);
+  });
+
+  const embeds = [];
+  CATEGORY_ORDER.forEach((categoryKey) => {
+    const categoryEvents = grouped.get(categoryKey);
+    if (!categoryEvents?.length) return;
+    embeds.push(buildCategorySectionEmbed(categoryKey, categoryEvents));
+  });
+  return embeds;
+}
+
+async function syncEventsBoard(interaction, data) {
+  const eventsStore = ensureEventsStore(data);
+  const publishChannelId = process.env.EVENTS_PUBLISH_CHANNEL_ID;
+  if (!publishChannelId) {
+    return { ok: false, error: "Missing EVENTS_PUBLISH_CHANNEL_ID in environment." };
+  }
+
+  const channel = await interaction.client.channels.fetch(publishChannelId).catch(() => null);
+  if (!channel || !channel.isTextBased?.()) {
+    return { ok: false, error: "Could not access EVENTS_PUBLISH_CHANNEL_ID channel." };
+  }
+
+  const embeds = buildCategoryBoardEmbeds(data);
+  const content = "Upcoming Events By Region";
+  let message = null;
+
+  if (
+    eventsStore.boardMessageId &&
+    eventsStore.boardChannelId === publishChannelId
+  ) {
+    message = await channel.messages.fetch(eventsStore.boardMessageId).catch(() => null);
+  }
+
+  if (message) {
+    await message.edit({ content, embeds });
+  } else {
+    message = await channel.send({ content, embeds });
+  }
+
+  eventsStore.boardMessageId = message.id;
+  eventsStore.boardChannelId = publishChannelId;
+  saveData(data);
+  return { ok: true, messageId: message.id };
+}
+
+function buildEventsListEmbed(events, label) {
+  if (!events.length) {
+    return new EmbedBuilder()
+      .setTitle(`Events: ${label}`)
+      .setDescription("No events found for this month.")
+      .setColor(0x64748b);
+  }
+
+  const lines = events.map(
+    (event) =>
+      `\`${event.id}\` — **${event.name}** (${getRegionLabel(event.region)})\n${formatEventDate(
+        event.date
+      )}`
+  );
+
+  return new EmbedBuilder()
+    .setTitle(`Events: ${label}`)
+    .setDescription(lines.join("\n\n"))
+    .setColor(0x3b82f6);
+}
+
+function buildEventAddModal(sessionId, session) {
+  const { startGgUrl = "", imported = null } = session ?? {};
+  const modal = new ModalBuilder()
+    .setCustomId(`events:addModal:${sessionId}`)
+    .setTitle("Add upcoming event");
+
+  const nameInput = new TextInputBuilder()
+    .setCustomId("name")
+    .setLabel("Event name")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(!startGgUrl)
+    .setPlaceholder(startGgUrl ? "Leave blank to import from start.gg" : "Raffle Rumble 67");
+  if (imported?.name) {
+    nameInput.setValue(imported.name.slice(0, 100));
+  }
+
+  const dateInput = new TextInputBuilder()
+    .setCustomId("date")
+    .setLabel("Date (YYYY-MM-DD)")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(!startGgUrl)
+    .setPlaceholder(startGgUrl ? "Leave blank to import from start.gg" : "2027-03-01");
+  if (imported?.date) {
+    dateInput.setValue(imported.date.slice(0, 10));
+  }
+
+  const addressInput = new TextInputBuilder()
+    .setCustomId("address")
+    .setLabel("Where (address/city)")
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(!startGgUrl)
+    .setPlaceholder(
+      startGgUrl ? "Leave blank to import from start.gg" : "1100 S Broadview 11 & 12, Cape Girardeau MO"
+    );
+  if (imported?.address) {
+    addressInput.setValue(imported.address.slice(0, 4000));
+  }
+
+  const registerInput = new TextInputBuilder()
+    .setCustomId("registerUrl")
+    .setLabel("Register URL")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(!startGgUrl)
+    .setPlaceholder("https://start.gg/example");
+  const registerPrefill = imported?.registerUrl || (startGgUrl ? normalizeRegisterReference(startGgUrl) : "");
+  if (registerPrefill) {
+    registerInput.setValue(registerPrefill.slice(0, 100));
+  }
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(nameInput),
+    new ActionRowBuilder().addComponents(dateInput),
+    new ActionRowBuilder().addComponents(addressInput),
+    new ActionRowBuilder().addComponents(registerInput)
+  );
+  return modal;
+}
+
+function buildRegionSelectionEmbed() {
+  return new EmbedBuilder()
+    .setTitle("Select Region")
+    .setDescription("Choose the region for this event to finish saving it.")
+    .setColor(0x3b82f6);
+}
+
+function buildRegionSelectionComponents(sessionId) {
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId(`eventsAdd:regionSelect:${sessionId}`)
+    .setPlaceholder("Select a region")
+    .addOptions(
+      { label: "SEMO", value: "semo" },
+      { label: "Rolla", value: "rolla" },
+      { label: "St. Louis", value: "stl" },
+      { label: "Kansas City", value: "kc" },
+      { label: "CoMo", value: "como" },
+      { label: "SoIL", value: "soil" },
+      { label: "Springfield", value: "springfield" },
+      { label: "WKY", value: "wky" },
+      { label: "Regional", value: "regional" },
+      { label: "Major", value: "major" }
+    );
+  return [new ActionRowBuilder().addComponents(menu)];
 }
 
 
@@ -1029,7 +1807,8 @@ function handlePlayerCommand(action, args, data) {
       tag: name,
       team: "",
       topPlayer: false,
-      captain: false
+      captain: false,
+      points: 0
     };
     saveData(data);
     return `Added player: ${name}`;
@@ -1100,6 +1879,209 @@ function handleTeamCommand(action, args, data) {
   return "Unknown /team command. Try: add, manage";
 }
 
+function handleScoresCommand(action, args, data) {
+  if (action === "add") {
+    return "Use the interactive `/scores add` command in Discord to add or remove points.";
+  }
+  return "Unknown /scores command.";
+}
+
+async function handleEventsCommand(interaction, data) {
+  const sub = interaction.options.getSubcommand();
+  const eventsStore = ensureEventsStore(data);
+  const commandChannelId = process.env.EVENTS_COMMAND_CHANNEL_ID;
+
+  if (commandChannelId && interaction.channelId !== commandChannelId) {
+    return {
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("Use events commands in the configured command channel.")
+          .setDescription(`Command channel: <#${commandChannelId}>`)
+          .setColor(0xef4444)
+      ],
+      flags: MessageFlags.Ephemeral
+    };
+  }
+
+  if (sub === "add") {
+    const startGgUrl = interaction.options.getString("startgg_url", false)?.trim() ?? "";
+
+    if (startGgUrl && !validateStartGgInput(startGgUrl)) {
+      return {
+        embeds: [
+          new EmbedBuilder()
+            .setTitle("Invalid start.gg reference.")
+            .setDescription("Use a full start.gg URL or a short tournament slug like `raffle-rumble`.")
+            .setColor(0xef4444)
+        ],
+        flags: MessageFlags.Ephemeral
+      };
+    }
+
+    let imported = null;
+    let importStatus = "";
+    if (startGgUrl) {
+      const result = await importStartGgEvent(startGgUrl);
+      if (result.ok) {
+        imported = result.data;
+        importStatus = "Imported available fields from start.gg.";
+      } else {
+        importStatus = `Could not import from start.gg: ${result.error}`;
+      }
+    }
+
+    eventAddSessions.set(interaction.id, {
+      startGgUrl,
+      imported,
+      importStatus
+    });
+
+    const modal = buildEventAddModal(interaction.id, {
+      startGgUrl,
+      imported,
+      importStatus
+    });
+    await interaction.showModal(modal);
+    return null;
+  }
+
+  if (sub === "edit") {
+    const id = interaction.options.getString("id", true).trim();
+    const event = eventsStore.items[id];
+    if (!event) {
+      return {
+        embeds: [new EmbedBuilder().setTitle(`Event not found: ${id}`).setColor(0xef4444)],
+        flags: MessageFlags.Ephemeral
+      };
+    }
+
+    const nextName = interaction.options.getString("name", false)?.trim();
+    const nextDateRaw = interaction.options.getString("date", false)?.trim();
+    const nextRegion = interaction.options.getString("region", false);
+    const nextAddress = interaction.options.getString("address", false)?.trim();
+    const nextRegisterUrl = interaction.options.getString("register_url", false)?.trim();
+    const nextNotes = interaction.options.getString("notes", false)?.trim();
+
+    const changed = [];
+    if (nextName) {
+      event.name = nextName;
+      changed.push("name");
+    }
+    if (nextDateRaw != null) {
+      const parsed = parseIsoDate(nextDateRaw);
+      if (!parsed) {
+        return {
+          embeds: [new EmbedBuilder().setTitle("Date must use YYYY-MM-DD format.").setColor(0xef4444)],
+          flags: MessageFlags.Ephemeral
+        };
+      }
+      event.date = parsed;
+      changed.push("date");
+    }
+    if (nextRegion) {
+      event.region = nextRegion;
+      changed.push("region");
+    }
+    if (nextAddress) {
+      event.address = nextAddress;
+      changed.push("address");
+    }
+    if (nextRegisterUrl != null) {
+      if (!validateRegisterReference(nextRegisterUrl)) {
+        return {
+          embeds: [new EmbedBuilder().setTitle("Register must be a URL or start.gg slug.").setColor(0xef4444)],
+          flags: MessageFlags.Ephemeral
+        };
+      }
+      event.registerUrl = normalizeRegisterReference(nextRegisterUrl);
+      changed.push("register_url");
+    }
+    if (nextNotes != null) {
+      event.notes = nextNotes;
+      changed.push("notes");
+    }
+
+    if (!changed.length) {
+      return {
+        embeds: [
+          new EmbedBuilder()
+            .setTitle("No changes provided.")
+            .setDescription("Provide at least one field to update.")
+            .setColor(0xef4444)
+        ],
+        flags: MessageFlags.Ephemeral
+      };
+    }
+
+    saveData(data);
+    await syncEventsBoard(interaction, data);
+    return {
+      embeds: [
+        new EmbedBuilder()
+          .setTitle(`Event updated: ${event.name}`)
+          .setDescription(`Updated: ${changed.join(", ")}`)
+          .setColor(0x22c55e),
+        buildEventEmbed(event, data)
+      ]
+    };
+  }
+
+  if (sub === "remove") {
+    const id = interaction.options.getString("id", true).trim();
+    const event = eventsStore.items[id];
+    if (!event) {
+      return {
+        embeds: [new EmbedBuilder().setTitle(`Event not found: ${id}`).setColor(0xef4444)],
+        flags: MessageFlags.Ephemeral
+      };
+    }
+    delete eventsStore.items[id];
+    saveData(data);
+    await syncEventsBoard(interaction, data);
+    return {
+      embeds: [new EmbedBuilder().setTitle(`Event removed: ${event.name}`).setColor(0xef4444)]
+    };
+  }
+
+  if (sub === "list") {
+    const monthSelection = resolveMonthSelection(interaction);
+    const events = getEventsForMonth(data, monthSelection.monthKey);
+    return { embeds: [buildEventsListEmbed(events, monthSelection.label)], flags: MessageFlags.Ephemeral };
+  }
+
+  if (sub === "publish") {
+    const result = await syncEventsBoard(interaction, data);
+    if (!result.ok) {
+      return {
+        embeds: [new EmbedBuilder().setTitle(result.error).setColor(0xef4444)],
+        flags: MessageFlags.Ephemeral
+      };
+    }
+    return {
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("Events board updated")
+          .setDescription(`Message ID: \`${result.messageId}\``)
+          .setColor(0x22c55e)
+      ],
+      flags: MessageFlags.Ephemeral
+    };
+  }
+
+  return {
+    embeds: [new EmbedBuilder().setTitle("Unknown /events command.").setColor(0xef4444)],
+    flags: MessageFlags.Ephemeral
+  };
+}
+
+function handleResetCommand() {
+  const result = resetData();
+  if (!result.ok) {
+    return { ok: false, message: "Failed to reset data. No changes were applied." };
+  }
+  return { ok: true, message: "All bot data has been reset to its initial state." };
+}
+
 function handleMessageContent(content) {
   const command = parseCommand(content);
   if (!command) return null;
@@ -1118,10 +2100,15 @@ function handleMessageContent(content) {
     return handleTeamCommand(command.action, command.args, data);
   }
 
+  if (command.root === "reset") {
+    const result = handleResetCommand();
+    return result.message;
+  }
+
   return "Unknown command.";
 }
 
-function handleSlashCommand(interaction) {
+async function handleSlashCommand(interaction) {
   const data = loadData();
   const commandName = interaction.commandName;
 
@@ -1207,10 +2194,213 @@ function handleSlashCommand(interaction) {
     return { embeds: [buildTeamsListEmbed(data)] };
   }
 
+  if (commandName === "scores") {
+    const sub = interaction.options.getSubcommand();
+    if (sub === "add" || sub === "remove") {
+      const embed = buildScoresMenuEmbed();
+      const components = buildScoresMenuComponents(data);
+      return { embeds: [embed], components };
+    }
+  }
+
+  if (commandName === "points") {
+    return { embeds: [buildPointsEmbed(data)] };
+  }
+
+  if (commandName === "events") {
+    return await handleEventsCommand(interaction, data);
+  }
+
+  if (commandName === "reset") {
+    const result = handleResetCommand();
+    if (!result.ok) {
+      return {
+        embeds: [new EmbedBuilder().setTitle(result.message).setColor(0xef4444)],
+        flags: MessageFlags.Ephemeral
+      };
+    }
+
+    return {
+      embeds: [new EmbedBuilder().setTitle(result.message).setColor(0x22c55e)]
+    };
+  }
+
   return { embeds: [new EmbedBuilder().setTitle("Unknown command.").setColor(0xef4444)] };
 }
 
 async function handleComponentInteraction(interaction) {
+  const data = loadData();
+  const [scope, action, key, extra] = interaction.customId.split(":");
+
+  if (scope === "scores") {
+    const teamKey = decodeKey(key);
+    const sessionId = interaction.message?.id;
+    if (!sessionId) return;
+
+    if (action === "select") {
+      const team = data.teams[teamKey];
+      if (!team) {
+        await interaction.reply({
+          embeds: [new EmbedBuilder().setTitle("Team not found.").setColor(0xef4444)],
+          flags: MessageFlags.Ephemeral
+        });
+        return;
+      }
+      const session = { teamKey, points: null, playerKey: "__team__" };
+      scoreSessions.set(sessionId, session);
+      await interaction.update({
+        embeds: [buildScoresAddEmbed(team, session, data)],
+        components: buildScoresAddComponents(team, session, sessionId, data)
+      });
+      return;
+    }
+
+    if (action === "playerSelect") {
+      const session = scoreSessions.get(sessionId);
+      if (!session) return;
+      session.playerKey = interaction.values[0];
+      const team = data.teams[session.teamKey];
+      await interaction.update({
+        embeds: [buildScoresAddEmbed(team, session, data)],
+        components: buildScoresAddComponents(team, session, sessionId, data)
+      });
+      return;
+    }
+
+    if (action === "pointsModal") {
+      const team = data.teams[teamKey];
+      if (!team) {
+        await interaction.reply({
+          embeds: [new EmbedBuilder().setTitle("Team not found.").setColor(0xef4444)],
+          flags: MessageFlags.Ephemeral
+        });
+        return;
+      }
+      const modal = new ModalBuilder()
+        .setCustomId(`scores:pointsModal:${teamKey}:${extra}`)
+        .setTitle("Add how many points?");
+      const input = new TextInputBuilder()
+        .setCustomId("points")
+        .setLabel("Add how many points?")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setPlaceholder("Use negative to remove");
+      modal.addComponents(new ActionRowBuilder().addComponents(input));
+      await interaction.showModal(modal);
+      return;
+    }
+
+    if (action === "confirm") {
+      const session = scoreSessions.get(sessionId);
+      if (!session || session.points == null) {
+        await interaction.reply({
+          embeds: [new EmbedBuilder().setTitle("Set point value first.").setColor(0xef4444)],
+          flags: MessageFlags.Ephemeral
+        });
+        return;
+      }
+      const team = data.teams[session.teamKey];
+      if (!team) return;
+      const amount = session.points;
+      const player = session.playerKey && session.playerKey != "__team__" ? data.players[session.playerKey] : null;
+      team.points = (team.points ?? 0) + amount;
+      if (player) {
+        player.points = (player.points ?? 0) + amount;
+      }
+      saveData(data);
+      scoreSessions.delete(sessionId);
+      const verb = amount >= 0 ? "Added" : "Removed";
+      const description = player
+        ? `${verb} ${Math.abs(amount)} pts for ${player.tag} (${team.name}).`
+        : `${verb} ${Math.abs(amount)} pts for ${team.name}.`;
+      await interaction.update({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle("Points recorded")
+            .setDescription(description)
+            .setColor(0x22c55e)
+        ],
+        components: []
+      });
+      return;
+    }
+
+    if (action === "cancel") {
+      scoreSessions.delete(sessionId);
+      await interaction.update({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle("Cancelled")
+            .setDescription("Point assignment cancelled.")
+            .setColor(0x94a3b8)
+        ],
+        components: []
+      });
+      return;
+    }
+  }
+
+  if (scope === "eventsAdd" && action === "regionSelect") {
+    const session = eventAddSessions.get(key);
+    if (!session || !session.pendingDraft) {
+      await interaction.reply({
+        embeds: [new EmbedBuilder().setTitle("Event draft expired. Run /events add again.").setColor(0xef4444)],
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    const regionKey = normalizeRegionInput(interaction.values?.[0] ?? "");
+    if (!regionKey) {
+      await interaction.reply({
+        embeds: [new EmbedBuilder().setTitle("Invalid region selection.").setColor(0xef4444)],
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    const eventsStore = ensureEventsStore(data);
+    const id = createEventId();
+    const event = {
+      id,
+      name: session.pendingDraft.name,
+      date: session.pendingDraft.date,
+      region: regionKey,
+      address: session.pendingDraft.address,
+      registerUrl: session.pendingDraft.registerUrl,
+      notes: ""
+    };
+    eventsStore.items[id] = event;
+    saveData(data);
+
+    const syncResult = await syncEventsBoard(interaction, data);
+    eventAddSessions.delete(key);
+    if (!syncResult.ok) {
+      await interaction.update({
+        embeds: [new EmbedBuilder().setTitle(syncResult.error).setColor(0xef4444)],
+        components: []
+      });
+      return;
+    }
+
+    const infoLines = [
+      `ID: \`${id}\``,
+      session.importStatus || "Manual entry saved.",
+      "If you haven't created a start.gg page yet, consider doing so so event details can be imported automatically."
+    ];
+    await interaction.update({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle(`Event added: ${event.name}`)
+          .setDescription(infoLines.join("\n"))
+          .setColor(0x22c55e),
+        buildEventEmbed(event, data)
+      ],
+      components: []
+    });
+    return;
+  }
+
   if (!interaction.deferred && !interaction.replied) {
     await interaction.deferUpdate();
   }
@@ -1223,15 +2413,12 @@ async function handleComponentInteraction(interaction) {
   };
 
   const replyEphemeral = async (payload) => {
-    const messagePayload = { ...payload, ephemeral: true };
+    const messagePayload = { ...payload, flags: MessageFlags.Ephemeral };
     if (interaction.deferred || interaction.replied) {
       return interaction.followUp(messagePayload);
     }
     return interaction.reply(messagePayload);
   };
-
-  const data = loadData();
-  const [scope, action, key, extra] = interaction.customId.split(":");
 
   if (scope === "playerList") {
     const players = Object.values(data.players).sort((a, b) =>
@@ -1712,18 +2899,130 @@ async function handleComponentInteraction(interaction) {
     }
   }
 }
-
 async function handleModalSubmit(interaction) {
   const parts = interaction.customId.split(":");
   const [scope, action, key] = parts;
   const data = loadData();
+
+  if (scope === "events" && action === "addModal") {
+    const session = eventAddSessions.get(key);
+    if (!session) {
+      await interaction.reply({
+        embeds: [new EmbedBuilder().setTitle("Event form expired. Run /events add again.").setColor(0xef4444)],
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    const manual = {
+      name: interaction.fields.getTextInputValue("name").trim(),
+      date: interaction.fields.getTextInputValue("date").trim(),
+      address: interaction.fields.getTextInputValue("address").trim(),
+      registerUrl: interaction.fields.getTextInputValue("registerUrl").trim()
+    };
+
+    const imported = session.imported ?? null;
+
+    const name = manual.name || imported?.name || "";
+    const dateRaw = manual.date || imported?.date || "";
+    const address = manual.address || imported?.address || "";
+    const registerUrl = manual.registerUrl || imported?.registerUrl || session.startGgUrl || "";
+
+    if (!name || !dateRaw || !address || !registerUrl) {
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle("Missing required fields.")
+            .setDescription(
+              "Provide name, date, where (address), and register URL. start.gg import can fill missing values when available."
+            )
+            .setColor(0xef4444)
+        ],
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    const date = parseIsoDate(dateRaw);
+    if (!date) {
+      await interaction.reply({
+        embeds: [new EmbedBuilder().setTitle("Date must use YYYY-MM-DD format.").setColor(0xef4444)],
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    if (!validateRegisterReference(registerUrl)) {
+      await interaction.reply({
+        embeds: [new EmbedBuilder().setTitle("Register must be a URL or start.gg slug.").setColor(0xef4444)],
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    session.pendingDraft = {
+      name,
+      date,
+      address,
+      registerUrl: normalizeRegisterReference(registerUrl)
+    };
+    eventAddSessions.set(key, session);
+    await interaction.reply({
+      embeds: [buildRegionSelectionEmbed()],
+      components: buildRegionSelectionComponents(key),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (scope === "scores" && action === "pointsModal") {
+    const sessionId = parts[3];
+    const session = scoreSessions.get(sessionId);
+    if (!session) {
+      await interaction.reply({
+        embeds: [new EmbedBuilder().setTitle("Session expired.").setColor(0xef4444)],
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    const amountRaw = interaction.fields.getTextInputValue("points").trim();
+    const amount = Number.parseInt(amountRaw, 10);
+    if (!Number.isFinite(amount)) {
+      await interaction.reply({
+        embeds: [new EmbedBuilder().setTitle("Amount must be a whole number.").setColor(0xef4444)],
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    session.points = amount;
+    const team = data.teams[session.teamKey];
+    if (team && interaction.channel) {
+      try {
+        const message = await interaction.channel.messages.fetch(sessionId);
+        await message.edit({
+          embeds: [buildScoresAddEmbed(team, session, data)],
+          components: buildScoresAddComponents(team, session, sessionId, data)
+        });
+      } catch (err) {
+        console.error("Failed to update points message:", err);
+      }
+    }
+
+    await interaction.reply({
+      embeds: [new EmbedBuilder().setTitle("Points recorded (pending confirmation).").setColor(0x22c55e)],
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
 
   if (scope === "player" && action === "renameModal") {
     const player = data.players[key];
     if (!player) {
       await interaction.reply({
         embeds: [new EmbedBuilder().setTitle("Player not found.").setColor(0xef4444)],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -1732,7 +3031,7 @@ async function handleModalSubmit(interaction) {
     if (!nextName) {
       await interaction.reply({
         embeds: [new EmbedBuilder().setTitle("Name cannot be empty.").setColor(0xef4444)],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -1741,7 +3040,7 @@ async function handleModalSubmit(interaction) {
     if (!result.ok) {
       await interaction.reply({
         embeds: [new EmbedBuilder().setTitle(result.error).setColor(0xef4444)],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -1772,7 +3071,7 @@ async function handleModalSubmit(interaction) {
     if (!team) {
       await interaction.reply({
         embeds: [new EmbedBuilder().setTitle("Team not found.").setColor(0xef4444)],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -1781,7 +3080,7 @@ async function handleModalSubmit(interaction) {
     if (!nextName) {
       await interaction.reply({
         embeds: [new EmbedBuilder().setTitle("Name cannot be empty.").setColor(0xef4444)],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -1790,7 +3089,7 @@ async function handleModalSubmit(interaction) {
     if (!result.ok) {
       await interaction.reply({
         embeds: [new EmbedBuilder().setTitle(result.error).setColor(0xef4444)],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -1823,7 +3122,7 @@ async function handleModalSubmit(interaction) {
     if (!team) {
       await interaction.reply({
         embeds: [new EmbedBuilder().setTitle("Team not found.").setColor(0xef4444)],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -1833,7 +3132,7 @@ async function handleModalSubmit(interaction) {
     if (!Number.isFinite(amount)) {
       await interaction.reply({
         embeds: [new EmbedBuilder().setTitle("Amount must be a whole number.").setColor(0xef4444)],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -1872,7 +3171,7 @@ async function handleModalSubmit(interaction) {
       if (!team) {
         await interaction.reply({
           embeds: [new EmbedBuilder().setTitle("Team not found.").setColor(0xef4444)],
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       }
@@ -1888,7 +3187,7 @@ async function handleModalSubmit(interaction) {
     if (!team) {
       await interaction.reply({
         embeds: [new EmbedBuilder().setTitle("Team not found.").setColor(0xef4444)],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -2014,7 +3313,7 @@ async function runDiscordBot() {
     intents: [GatewayIntentBits.Guilds]
   });
 
-  client.on("ready", () => {
+  client.on("clientReady", () => {
     console.log(`Logged in as ${client.user.tag}`);
   });
 
@@ -2037,7 +3336,7 @@ async function runDiscordBot() {
                 .setDescription(`Action: ${interaction.customId}`)
                 .setColor(0xef4444)
             ],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
         }
       }
@@ -2047,14 +3346,16 @@ async function runDiscordBot() {
     if (!interaction.isChatInputCommand()) return;
 
     try {
-      const response = handleSlashCommand(interaction);
-      await interaction.reply(response);
+      const response = await handleSlashCommand(interaction);
+      if (response) {
+        await interaction.reply(response);
+      }
     } catch (err) {
       console.error("Failed to handle interaction:", err);
       if (!interaction.replied) {
         await interaction.reply({
           embeds: [new EmbedBuilder().setTitle("Something went wrong.").setColor(0xef4444)],
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
       }
     }

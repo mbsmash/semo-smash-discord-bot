@@ -1,100 +1,80 @@
-# Smash Bot (Alpha)
+# Smash Bot User Guide
 
-Discord bot for managing Smash season teams and players, with a local terminal test mode.
+Smash Bot has two separate functional flows:
 
-## Setup
+1. Season Management (players, teams, scores, points)
+2. Event Management (upcoming events board by region)
 
-1. Copy `.env.example` to `.env` and add your bot token:
+These systems are intentionally separate so communities can use one or both without mixing workflows.
 
-```bash
-cp .env.example .env
-```
+## Quick Start
 
-Add these values from the Discord Developer Portal:
+1. Invite/add the bot to your server.
+2. Ask an admin to run `npm run register:commands` if commands are not visible yet.
+3. Use slash commands in Discord.
 
-- `DISCORD_BOT_TOKEN`
-- `DISCORD_APPLICATION_ID`
-- `DISCORD_PUBLIC_KEY` (not used yet)
-- `DISCORD_GUILD_ID` (optional; faster slash-command updates for a test server)
+## Core Functions and Commands
 
-2. Install dependencies:
+The bot features two main areas of functionality:
 
-```bash
-npm install
-```
+1. Manage and update players and teams for the themed SEMO Smash Season competitions.
 
-3. Run the bot:
+2. Easily manage and share information for upcoming tournaments and events in the community.
 
-```bash
-npm run start
-```
+## Season Management Commands
 
-## Slash commands (Discord UI)
+#### Players
 
-Register commands after updating `.env`:
-
-```bash
-npm run register:commands
-```
-
-If `DISCORD_GUILD_ID` is set, commands register instantly for that server. Otherwise global commands can take a while to appear.
-
-### Discord UI
-
-Use `/player manage` and `/team manage` to open interactive embeds with buttons and select menus for updating data.
-
-## Local testing (no Discord required)
-
-- Interactive mode:
-
-```bash
-npm run test:local
-```
-
-- One-off test:
-
-```bash
-node src/index.js --test "/player add Alpha"
-```
-
-Local commands accept either `!` or `/` prefixes.
-
-### Interactive manage menus (local only)
-
-In local test mode, `/player manage [playerName]` and `/team manage [teamName]` open arrow-key menus for:
-
-- Updating names
-- Assigning teams
-- Toggling top player / captain
-- Managing team rosters (select a member to make captain or remove from team)
-
-## Commands
-
-The bot uses Discord slash commands only in Discord. Message commands are supported in local test mode.
-
-### Player commands
-
-- `/player add [playerName]`
-- `/player assign [playerName]` (optional `[teamName]`; otherwise balanced auto-assign)
-- `/player manage [playerName]`
+- `/player add`
+- `/player assign`
+- `/player manage`
 - `/player list`
 
-### Team commands
+#### Teams
 
-- `/team add [teamName]`
-- `/team manage [teamName]`
+- `/team add`
+- `/team manage`
+- `/teams`
 
-### Teams view
+#### Scores
 
-- `/teams` (embeds every team with score + roster)
-  - `/player list` shows up to 10 players per page with Next/Previous/Close buttons.
+- `/scores add`
+- `/scores remove`
+- `/points`
 
+## Event Management Commands
 
-## Data storage
+- `/events add`
+- `/events edit`
+- `/events remove`
+- `/events list`
+- `/events publish`
 
-- Data is stored locally in `data/data.json`.
-- The file is created on first use.
+### Debug
 
-## Notes
+- `/reset`
 
-- This is an alpha workflow: use `/help` to list commands and build out features iteratively.
+## Event Management Workflow
+
+`/events add` flow:
+
+1. Open add modal (optional `startgg_url` pre-fills fields).
+2. Submit modal.
+3. Select region from dropdown (SEMO, Rolla, St. Louis, Kansas City, CoMo, SoIL, Springfield, WKY, Regional, Major).
+4. Bot saves event and updates the board message.
+
+## Events Board Behavior
+
+- Board message is a single post in the configured publish channel.
+- Event sections are shown as grouped categories:
+  - SEMO Events: SEMO
+  - Missouri and Nearby Region Events: STL, KC, Rolla, CoMo, SoIL, Springfield, WKY
+  - Regional/Major Events: Regional, Major
+- Categories with no events are automatically hidden.
+- Adding/removing/editing events auto-updates the board.
+
+## Need Dev/Setup Details?
+
+See the developer documentation:
+
+- `README.developer.md`
