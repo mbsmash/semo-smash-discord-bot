@@ -1051,14 +1051,39 @@ async function syncEventsBoard(interaction, data) {
     };
   }
 
-  const channel = interaction.guild
-    ? await interaction.guild.channels.fetch(publishChannelId).catch(() => null)
-    : await interaction.client.channels.fetch(publishChannelId).catch(() => null);
+  let channel = null;
+  let fetchError = null;
+  if (interaction.guild) {
+    channel = await interaction.guild.channels.fetch(publishChannelId).catch((err) => {
+      fetchError = err;
+      return null;
+    });
+  }
+  if (!channel) {
+    channel = await interaction.client.channels.fetch(publishChannelId).catch((err) => {
+      fetchError = fetchError ?? err;
+      return null;
+    });
+  }
   if (!channel || !channel.isTextBased?.()) {
+    const context = [
+      `configured_channel_id=${publishChannelId}`,
+      `guild_id=${interaction.guildId ?? "unknown"}`
+    ];
+    if (fetchError?.message) {
+      context.push(`reason=${fetchError.message}`);
+    }
     return {
       ok: false,
       error:
-        "Could not access the configured publish channel. Re-run /setup channels or verify channel permissions."
+        `Could not access the configured publish channel (${context.join(", ")}). Re-run /setup channels or verify channel permissions.`
+    };
+  }
+  if (interaction.guildId && channel.guildId && channel.guildId !== interaction.guildId) {
+    return {
+      ok: false,
+      error:
+        `Configured publish channel belongs to a different server (channel_guild_id=${channel.guildId}, command_guild_id=${interaction.guildId}). Re-run /setup channels in this server.`
     };
   }
   if (!("send" in channel) || typeof channel.send !== "function") {
