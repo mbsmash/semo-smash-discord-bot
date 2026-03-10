@@ -45,7 +45,7 @@ The bot features two main areas of functionality:
 
 ## Event Management Commands
 
-- `/setup channels` (admin only; choose the server’s events command + publish channels)
+- `/setup channels` (admin only; choose the server’s events command + publish channels, optional cleanup)
 - `/events add`
 - `/events edit`
 - `/events remove`
@@ -65,9 +65,14 @@ The bot features two main areas of functionality:
 3. Select region from dropdown (SEMO, Rolla, St. Louis, Kansas City, CoMo, SoIL, Springfield, WKY, Regional, Major).
 4. Bot saves event and updates the board message.
 
+`/setup channels` supports an optional `clear_existing_events` toggle:
+
+- When enabled, it clears the current server's saved events and resets its board tracking.
+
 ## Events Board Behavior
 
 - The channel routing is per server and configured with `/setup channels`.
+- Event lists are stored per server.
 - Board message is a single post in the configured publish channel.
 - Event sections are shown as grouped categories:
   - SEMO Events: SEMO

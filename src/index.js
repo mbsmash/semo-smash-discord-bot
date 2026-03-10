@@ -193,6 +193,9 @@ function ensureEventsStore(data) {
   if (!data.events.items || typeof data.events.items !== "object") {
     data.events.items = {};
   }
+  if (!data.events.guildItems || typeof data.events.guildItems !== "object") {
+    data.events.guildItems = {};
+  }
   if (!data.events.publishedMessages || typeof data.events.publishedMessages !== "object") {
     data.events.publishedMessages = {};
   }
@@ -214,6 +217,26 @@ function ensureEventsStore(data) {
   });
 
   return data.events;
+}
+
+function getGuildEventItems(data, guildId) {
+  const eventsStore = ensureEventsStore(data);
+  const guildKey = guildId || "__default";
+  if (!eventsStore.guildItems[guildKey] || typeof eventsStore.guildItems[guildKey] !== "object") {
+    eventsStore.guildItems[guildKey] = {};
+  }
+
+  // One-time migration path from legacy global events.items to first active guild/default scope.
+  const hasLegacy = Object.keys(eventsStore.items ?? {}).length > 0;
+  const hasGuildScoped = Object.keys(eventsStore.guildItems).some(
+    (key) => Object.keys(eventsStore.guildItems[key] ?? {}).length > 0
+  );
+  if (hasLegacy && !hasGuildScoped) {
+    eventsStore.guildItems[guildKey] = { ...eventsStore.items };
+    eventsStore.items = {};
+  }
+
+  return eventsStore.guildItems[guildKey];
 }
 
 function ensureSettingsStore(data) {
@@ -941,9 +964,9 @@ function getRegionColor(data, regionKey) {
   return events.regionColors[regionKey] ?? 0x64748b;
 }
 
-function getEventsForMonth(data, monthKey) {
-  const eventsStore = ensureEventsStore(data);
-  return Object.values(eventsStore.items)
+function getEventsForMonth(data, monthKey, guildId) {
+  const events = getGuildEventItems(data, guildId);
+  return Object.values(events)
     .filter((event) => event.date?.startsWith(`${monthKey}-`))
     .sort((a, b) => {
       const dateCompare = a.date.localeCompare(b.date);
@@ -991,9 +1014,8 @@ function buildCategorySectionEmbed(categoryKey, events) {
     .setColor(getCategoryColor(categoryKey));
 }
 
-function buildCategoryBoardEmbeds(data) {
-  const eventsStore = ensureEventsStore(data);
-  const events = Object.values(eventsStore.items).sort((a, b) => {
+function buildCategoryBoardEmbeds(data, guildId) {
+  const events = Object.values(getGuildEventItems(data, guildId)).sort((a, b) => {
     const dateCompare = a.date.localeCompare(b.date);
     if (dateCompare !== 0) return dateCompare;
     return a.name.localeCompare(b.name, "en", { sensitivity: "base" });
@@ -1077,7 +1099,7 @@ async function syncEventsBoard(interaction, data) {
     }
   }
 
-  const embeds = buildCategoryBoardEmbeds(data);
+  const embeds = buildCategoryBoardEmbeds(data, interaction.guildId);
   const content = "Upcoming Events By Region";
   let message = null;
   const guildKey = interaction.guildId || "__default";
@@ -2030,7 +2052,7 @@ function handleScoresCommand(action, args, data) {
 
 async function handleEventsCommand(interaction, data) {
   const sub = interaction.options.getSubcommand();
-  const eventsStore = ensureEventsStore(data);
+  const guildEvents = getGuildEventItems(data, interaction.guildId);
   const { commandChannelId } = resolveEventsChannelConfig(data, interaction.guildId);
 
   if (commandChannelId && interaction.channelId !== commandChannelId) {
@@ -2066,6 +2088,7 @@ async function handleEventsCommand(interaction, data) {
       : "";
 
     eventAddSessions.set(interaction.id, {
+      guildId: interaction.guildId || "__default",
       startGgUrl,
       imported,
       importStatus
@@ -2082,7 +2105,7 @@ async function handleEventsCommand(interaction, data) {
 
   if (sub === "edit") {
     const id = interaction.options.getString("id", true).trim();
-    const event = eventsStore.items[id];
+    const event = guildEvents[id];
     if (!event) {
       return {
         embeds: [new EmbedBuilder().setTitle(`Event not found: ${id}`).setColor(0xef4444)],
@@ -2163,14 +2186,14 @@ async function handleEventsCommand(interaction, data) {
 
   if (sub === "remove") {
     const id = interaction.options.getString("id", true).trim();
-    const event = eventsStore.items[id];
+    const event = guildEvents[id];
     if (!event) {
       return {
         embeds: [new EmbedBuilder().setTitle(`Event not found: ${id}`).setColor(0xef4444)],
         flags: MessageFlags.Ephemeral
       };
     }
-    delete eventsStore.items[id];
+    delete guildEvents[id];
     saveData(data);
     await syncEventsBoard(interaction, data);
     return {
@@ -2180,7 +2203,7 @@ async function handleEventsCommand(interaction, data) {
 
   if (sub === "list") {
     const monthSelection = resolveMonthSelection(interaction);
-    const events = getEventsForMonth(data, monthSelection.monthKey);
+    const events = getEventsForMonth(data, monthSelection.monthKey, interaction.guildId);
     return { embeds: [buildEventsListEmbed(events, monthSelection.label)], flags: MessageFlags.Ephemeral };
   }
 
@@ -2271,21 +2294,33 @@ async function handleSlashCommand(interaction) {
     if (sub === "channels") {
       const eventsCommandChannel = interaction.options.getChannel("events_command_channel", true);
       const eventsPublishChannel = interaction.options.getChannel("events_publish_channel", true);
+      const clearExistingEvents =
+        interaction.options.getBoolean("clear_existing_events", false) ?? false;
       const guildSettings = getGuildSettings(data, interaction.guildId);
+      const eventsStore = ensureEventsStore(data);
+      const guildKey = interaction.guildId || "__default";
       guildSettings.eventsCommandChannelId = eventsCommandChannel.id;
       guildSettings.eventsPublishChannelId = eventsPublishChannel.id;
+
+      if (clearExistingEvents) {
+        eventsStore.guildItems[guildKey] = {};
+        delete eventsStore.publishedMessages[guildKey];
+      }
       saveData(data);
+
+      const setupLines = [
+        `Events command channel: <#${eventsCommandChannel.id}>`,
+        `Events publish channel: <#${eventsPublishChannel.id}>`
+      ];
+      if (clearExistingEvents) {
+        setupLines.push("Cleared existing events for this server.");
+      }
 
       return {
         embeds: [
           new EmbedBuilder()
             .setTitle("Channel setup saved")
-            .setDescription(
-              [
-                `Events command channel: <#${eventsCommandChannel.id}>`,
-                `Events publish channel: <#${eventsPublishChannel.id}>`
-              ].join("\n")
-            )
+            .setDescription(setupLines.join("\n"))
             .setColor(0x22c55e)
         ],
         flags: MessageFlags.Ephemeral
@@ -2530,6 +2565,14 @@ async function handleComponentInteraction(interaction) {
       });
       return;
     }
+    const interactionGuildKey = interaction.guildId || "__default";
+    if (session.guildId && session.guildId !== interactionGuildKey) {
+      await interaction.reply({
+        embeds: [new EmbedBuilder().setTitle("Event draft does not belong to this server.").setColor(0xef4444)],
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
 
     const regionKey = normalizeRegionInput(interaction.values?.[0] ?? "");
     if (!regionKey) {
@@ -2540,7 +2583,7 @@ async function handleComponentInteraction(interaction) {
       return;
     }
 
-    const eventsStore = ensureEventsStore(data);
+    const guildEvents = getGuildEventItems(data, interaction.guildId);
     const id = createEventId();
     const event = {
       id,
@@ -2551,7 +2594,7 @@ async function handleComponentInteraction(interaction) {
       registerUrl: session.pendingDraft.registerUrl,
       notes: ""
     };
-    eventsStore.items[id] = event;
+    guildEvents[id] = event;
     saveData(data);
 
     const syncResult = await syncEventsBoard(interaction, data);

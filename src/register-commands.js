@@ -167,6 +167,12 @@ const commands = [
             .setRequired(true)
             .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
         )
+        .addBooleanOption((opt) =>
+          opt
+            .setName("clear_existing_events")
+            .setDescription("Optional: clear this server's existing event list during setup")
+            .setRequired(false)
+        )
     ),
   new SlashCommandBuilder()
     .setName("reset")

@@ -108,7 +108,7 @@ The bot uses Discord slash commands only in Discord. Message commands are suppor
 
 ### Events commands
 
-- `/setup channels` (admin-only per-server setup for events command/publish channels)
+- `/setup channels` (admin-only per-server setup for events command/publish channels; optional `clear_existing_events` boolean)
 - `/events add` (opens modal first, then region dropdown; optional `startgg_url` URL or short slug)
 - `/events edit`
 - `/events remove`
@@ -127,6 +127,7 @@ Events board behavior:
 - The board message is posted/updated in a separate channel.
 - The board is a single message with one embed section per populated region.
 - Empty regions are omitted automatically.
+- Events are stored per guild to prevent cross-server data bleed.
 
 ### Debug command
 
