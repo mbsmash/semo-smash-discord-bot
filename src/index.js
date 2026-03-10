@@ -1010,13 +1010,52 @@ async function syncEventsBoard(interaction, data) {
     };
   }
 
-  const channel = await interaction.client.channels.fetch(publishChannelId).catch(() => null);
+  const channel = interaction.guild
+    ? await interaction.guild.channels.fetch(publishChannelId).catch(() => null)
+    : await interaction.client.channels.fetch(publishChannelId).catch(() => null);
   if (!channel || !channel.isTextBased?.()) {
     return {
       ok: false,
       error:
         "Could not access the configured publish channel. Re-run /setup channels or verify channel permissions."
     };
+  }
+  if (!("send" in channel) || typeof channel.send !== "function") {
+    return {
+      ok: false,
+      error: "Configured publish channel is not sendable by the bot."
+    };
+  }
+
+  if (interaction.guild && interaction.client.user) {
+    const permissions = channel.permissionsFor(interaction.client.user.id);
+    const required = [
+      PermissionsBitField.Flags.ViewChannel,
+      PermissionsBitField.Flags.SendMessages,
+      PermissionsBitField.Flags.EmbedLinks,
+      PermissionsBitField.Flags.ReadMessageHistory
+    ];
+    const missing = required.filter((perm) => !permissions?.has(perm));
+    if (missing.length) {
+      const missingLabels = missing.map((perm) => {
+        switch (perm) {
+          case PermissionsBitField.Flags.ViewChannel:
+            return "ViewChannel";
+          case PermissionsBitField.Flags.SendMessages:
+            return "SendMessages";
+          case PermissionsBitField.Flags.EmbedLinks:
+            return "EmbedLinks";
+          case PermissionsBitField.Flags.ReadMessageHistory:
+            return "ReadMessageHistory";
+          default:
+            return String(perm);
+        }
+      });
+      return {
+        ok: false,
+        error: `Missing bot permissions in publish channel: ${missingLabels.join(", ")}.`
+      };
+    }
   }
 
   const embeds = buildCategoryBoardEmbeds(data);
