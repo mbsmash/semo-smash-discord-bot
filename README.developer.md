@@ -38,8 +38,8 @@ npm run start
 - `DISCORD_APPLICATION_ID`
 - `DISCORD_GUILD_ID` (optional)
 - `START_GG_API_TOKEN` (optional)
-- `EVENTS_COMMAND_CHANNEL_ID` (recommended for events workflow)
-- `EVENTS_PUBLISH_CHANNEL_ID` (required for auto-synced events board)
+- `EVENTS_COMMAND_CHANNEL_ID` (optional fallback if per-server setup is not set)
+- `EVENTS_PUBLISH_CHANNEL_ID` (optional fallback if per-server setup is not set)
 
 3. Attach a persistent volume and mount it to `/data`.
 4. Set `BOT_DATA_DIR=/data` so `data.json` survives restarts/redeploys.
@@ -108,6 +108,7 @@ The bot uses Discord slash commands only in Discord. Message commands are suppor
 
 ### Events commands
 
+- `/setup channels` (admin-only per-server setup for events command/publish channels)
 - `/events add` (opens modal first, then region dropdown; optional `startgg_url` URL or short slug)
 - `/events edit`
 - `/events remove`
@@ -120,8 +121,10 @@ If not, you can enter everything manually in the modal.
 
 Events board behavior:
 
-- Events commands can be restricted to one command channel (`EVENTS_COMMAND_CHANNEL_ID`).
-- The board message is posted/updated in a separate channel (`EVENTS_PUBLISH_CHANNEL_ID`).
+- Recommended: configure channels per guild with `/setup channels`.
+- Optional fallback: `EVENTS_COMMAND_CHANNEL_ID` and `EVENTS_PUBLISH_CHANNEL_ID` env vars.
+- Events commands can be restricted to one command channel.
+- The board message is posted/updated in a separate channel.
 - The board is a single message with one embed section per populated region.
 - Empty regions are omitted automatically.
 
@@ -140,7 +143,7 @@ Events board behavior:
 ### Optional start.gg import
 
 - Set `START_GG_API_TOKEN` in `.env` to enable start.gg auto-import during `/events add`.
-- Set `EVENTS_COMMAND_CHANNEL_ID` and `EVENTS_PUBLISH_CHANNEL_ID` in `.env` to enable separated command/publish channels for events.
+- You can set `EVENTS_COMMAND_CHANNEL_ID` and `EVENTS_PUBLISH_CHANNEL_ID` in `.env` as fallback defaults.
 
 Quick API debug command:
 

@@ -8,6 +8,7 @@ import {
   InteractionType,
   MessageFlags,
   ModalBuilder,
+  PermissionsBitField,
   StringSelectMenuBuilder,
   TextInputBuilder,
   TextInputStyle
@@ -70,6 +71,9 @@ function createInitialData() {
   return {
     players: {},
     teams: {},
+    settings: {
+      guilds: {}
+    },
     events: {
       items: {},
       publishedMessages: {},
@@ -193,6 +197,39 @@ function ensureEventsStore(data) {
   return data.events;
 }
 
+function ensureSettingsStore(data) {
+  if (!data.settings || typeof data.settings !== "object") {
+    data.settings = {};
+  }
+  if (!data.settings.guilds || typeof data.settings.guilds !== "object") {
+    data.settings.guilds = {};
+  }
+  return data.settings;
+}
+
+function getGuildSettings(data, guildId) {
+  if (!guildId) return null;
+  const settings = ensureSettingsStore(data);
+  if (!settings.guilds[guildId] || typeof settings.guilds[guildId] !== "object") {
+    settings.guilds[guildId] = {};
+  }
+  return settings.guilds[guildId];
+}
+
+function resolveEventsChannelConfig(data, guildId) {
+  const guildSettings = getGuildSettings(data, guildId);
+  return {
+    commandChannelId:
+      guildSettings?.eventsCommandChannelId ||
+      process.env.EVENTS_COMMAND_CHANNEL_ID ||
+      "",
+    publishChannelId:
+      guildSettings?.eventsPublishChannelId ||
+      process.env.EVENTS_PUBLISH_CHANNEL_ID ||
+      ""
+  };
+}
+
 function loadData() {
   ensureDataDir();
   if (!fs.existsSync(DATA_PATH)) {
@@ -210,8 +247,10 @@ function loadData() {
     const data = {
       players: parsed.players ?? {},
       teams: parsed.teams ?? {},
+      settings: parsed.settings ?? {},
       events: parsed.events ?? {}
     };
+    ensureSettingsStore(data);
     ensureEventsStore(data);
     return data;
   } catch (err) {
@@ -962,24 +1001,33 @@ function buildCategoryBoardEmbeds(data) {
 
 async function syncEventsBoard(interaction, data) {
   const eventsStore = ensureEventsStore(data);
-  const publishChannelId = process.env.EVENTS_PUBLISH_CHANNEL_ID;
+  const { publishChannelId } = resolveEventsChannelConfig(data, interaction.guildId);
   if (!publishChannelId) {
-    return { ok: false, error: "Missing EVENTS_PUBLISH_CHANNEL_ID in environment." };
+    return {
+      ok: false,
+      error:
+        "No events publish channel configured. Use /setup channels in this server (or set EVENTS_PUBLISH_CHANNEL_ID)."
+    };
   }
 
   const channel = await interaction.client.channels.fetch(publishChannelId).catch(() => null);
   if (!channel || !channel.isTextBased?.()) {
-    return { ok: false, error: "Could not access EVENTS_PUBLISH_CHANNEL_ID channel." };
+    return {
+      ok: false,
+      error:
+        "Could not access the configured publish channel. Re-run /setup channels or verify channel permissions."
+    };
   }
 
   const embeds = buildCategoryBoardEmbeds(data);
   const content = "Upcoming Events By Region";
   let message = null;
+  const guildKey = interaction.guildId || "__default";
+  const trackedMessage = eventsStore.publishedMessages[guildKey];
 
-  if (
-    eventsStore.boardMessageId &&
-    eventsStore.boardChannelId === publishChannelId
-  ) {
+  if (trackedMessage?.messageId && trackedMessage.channelId === publishChannelId) {
+    message = await channel.messages.fetch(trackedMessage.messageId).catch(() => null);
+  } else if (eventsStore.boardMessageId && eventsStore.boardChannelId === publishChannelId) {
     message = await channel.messages.fetch(eventsStore.boardMessageId).catch(() => null);
   }
 
@@ -991,6 +1039,10 @@ async function syncEventsBoard(interaction, data) {
 
   eventsStore.boardMessageId = message.id;
   eventsStore.boardChannelId = publishChannelId;
+  eventsStore.publishedMessages[guildKey] = {
+    messageId: message.id,
+    channelId: publishChannelId
+  };
   saveData(data);
   return { ok: true, messageId: message.id };
 }
@@ -1889,7 +1941,7 @@ function handleScoresCommand(action, args, data) {
 async function handleEventsCommand(interaction, data) {
   const sub = interaction.options.getSubcommand();
   const eventsStore = ensureEventsStore(data);
-  const commandChannelId = process.env.EVENTS_COMMAND_CHANNEL_ID;
+  const { commandChannelId } = resolveEventsChannelConfig(data, interaction.guildId);
 
   if (commandChannelId && interaction.channelId !== commandChannelId) {
     return {
@@ -2111,6 +2163,52 @@ function handleMessageContent(content) {
 async function handleSlashCommand(interaction) {
   const data = loadData();
   const commandName = interaction.commandName;
+
+  if (commandName === "setup") {
+    if (!interaction.inGuild() || !interaction.guildId) {
+      return {
+        embeds: [new EmbedBuilder().setTitle("`/setup` can only be used in a server.").setColor(0xef4444)],
+        flags: MessageFlags.Ephemeral
+      };
+    }
+
+    const hasPermission = interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild);
+    if (!hasPermission) {
+      return {
+        embeds: [
+          new EmbedBuilder()
+            .setTitle("You need `Manage Server` permission to run `/setup`.")
+            .setColor(0xef4444)
+        ],
+        flags: MessageFlags.Ephemeral
+      };
+    }
+
+    const sub = interaction.options.getSubcommand();
+    if (sub === "channels") {
+      const eventsCommandChannel = interaction.options.getChannel("events_command_channel", true);
+      const eventsPublishChannel = interaction.options.getChannel("events_publish_channel", true);
+      const guildSettings = getGuildSettings(data, interaction.guildId);
+      guildSettings.eventsCommandChannelId = eventsCommandChannel.id;
+      guildSettings.eventsPublishChannelId = eventsPublishChannel.id;
+      saveData(data);
+
+      return {
+        embeds: [
+          new EmbedBuilder()
+            .setTitle("Channel setup saved")
+            .setDescription(
+              [
+                `Events command channel: <#${eventsCommandChannel.id}>`,
+                `Events publish channel: <#${eventsPublishChannel.id}>`
+              ].join("\n")
+            )
+            .setColor(0x22c55e)
+        ],
+        flags: MessageFlags.Ephemeral
+      };
+    }
+  }
 
   if (commandName === "player") {
     const sub = interaction.options.getSubcommand();

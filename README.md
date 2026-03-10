@@ -11,7 +11,8 @@ These systems are intentionally separate so communities can use one or both with
 
 1. Invite/add the bot to your server.
 2. Ask an admin to run `npm run register:commands` if commands are not visible yet.
-3. Use slash commands in Discord.
+3. Run `/setup channels` once to choose your events command channel and events board channel.
+4. Use slash commands in Discord.
 
 ## Core Functions and Commands
 
@@ -44,6 +45,7 @@ The bot features two main areas of functionality:
 
 ## Event Management Commands
 
+- `/setup channels` (admin only; choose the server’s events command + publish channels)
 - `/events add`
 - `/events edit`
 - `/events remove`
@@ -65,6 +67,7 @@ The bot features two main areas of functionality:
 
 ## Events Board Behavior
 
+- The channel routing is per server and configured with `/setup channels`.
 - Board message is a single post in the configured publish channel.
 - Event sections are shown as grouped categories:
   - SEMO Events: SEMO

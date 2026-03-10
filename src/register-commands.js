@@ -1,5 +1,5 @@
 import dotenv from "dotenv";
-import { REST, Routes, SlashCommandBuilder } from "discord.js";
+import { ChannelType, REST, Routes, SlashCommandBuilder } from "discord.js";
 
 dotenv.config();
 
@@ -144,6 +144,28 @@ const commands = [
         )
         .addIntegerOption((opt) =>
           opt.setName("year").setDescription("Year (e.g. 2027)").setMinValue(2000).setMaxValue(2100)
+        )
+    ),
+  new SlashCommandBuilder()
+    .setName("setup")
+    .setDescription("Configure server channels and bot behavior")
+    .addSubcommand((sub) =>
+      sub
+        .setName("channels")
+        .setDescription("Set channels used by the events workflow")
+        .addChannelOption((opt) =>
+          opt
+            .setName("events_command_channel")
+            .setDescription("Channel where /events commands are used")
+            .setRequired(true)
+            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+        )
+        .addChannelOption((opt) =>
+          opt
+            .setName("events_publish_channel")
+            .setDescription("Channel where the events board message is posted")
+            .setRequired(true)
+            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
         )
     ),
   new SlashCommandBuilder()
