@@ -1110,10 +1110,21 @@ async function syncEventsBoard(interaction, data) {
           "Discord denied posting in the publish channel (Missing Permissions). Ensure Send Messages and Embed Links are allowed."
       };
     }
-    return {
-      ok: false,
-      error: `Failed to publish events board: ${err?.message ?? "unknown error"}`
-    };
+    if (code === 10008) {
+      try {
+        message = await channel.send({ content, embeds });
+      } catch (sendErr) {
+        return {
+          ok: false,
+          error: `Board message was deleted and recreation failed: ${sendErr?.message ?? "unknown error"}`
+        };
+      }
+    } else {
+      return {
+        ok: false,
+        error: `Failed to publish events board: ${err?.message ?? "unknown error"}`
+      };
+    }
   }
 
   eventsStore.boardMessageId = message.id;
