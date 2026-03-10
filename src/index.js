@@ -160,6 +160,25 @@ function decodeKey(value) {
   }
 }
 
+function isUnknownInteractionError(err) {
+  return Number(err?.code) === 10062 || Number(err?.rawError?.code) === 10062;
+}
+
+async function safeReplyInteraction(interaction, payload) {
+  try {
+    if (interaction.deferred || interaction.replied) {
+      return await interaction.followUp(payload);
+    }
+    return await interaction.reply(payload);
+  } catch (err) {
+    if (isUnknownInteractionError(err)) {
+      console.warn("Skipped response because interaction expired.");
+      return null;
+    }
+    throw err;
+  }
+}
+
 function ensureDataDir() {
   const dir = path.dirname(DATA_PATH);
   if (!fs.existsSync(dir)) {
@@ -2009,17 +2028,10 @@ async function handleEventsCommand(interaction, data) {
       };
     }
 
-    let imported = null;
-    let importStatus = "";
-    if (startGgUrl) {
-      const result = await importStartGgEvent(startGgUrl);
-      if (result.ok) {
-        imported = result.data;
-        importStatus = "Imported available fields from start.gg.";
-      } else {
-        importStatus = `Could not import from start.gg: ${result.error}`;
-      }
-    }
+    const imported = null;
+    const importStatus = startGgUrl
+      ? "start.gg reference received. Submit the modal to auto-import available fields."
+      : "";
 
     eventAddSessions.set(interaction.id, {
       startGgUrl,
@@ -3058,7 +3070,22 @@ async function handleModalSubmit(interaction) {
       registerUrl: interaction.fields.getTextInputValue("registerUrl").trim()
     };
 
-    const imported = session.imported ?? null;
+    let imported = session.imported ?? null;
+    let importStatus = session.importStatus ?? "";
+    const needsImport = Boolean(
+      session.startGgUrl &&
+        (!manual.name || !manual.date || !manual.address || !manual.registerUrl)
+    );
+
+    if (needsImport && !imported) {
+      const result = await importStartGgEvent(session.startGgUrl);
+      if (result.ok) {
+        imported = result.data;
+        importStatus = "Imported available fields from start.gg.";
+      } else {
+        importStatus = `Could not import from start.gg: ${result.error}`;
+      }
+    }
 
     const name = manual.name || imported?.name || "";
     const dateRaw = manual.date || imported?.date || "";
@@ -3103,6 +3130,8 @@ async function handleModalSubmit(interaction) {
       address,
       registerUrl: normalizeRegisterReference(registerUrl)
     };
+    session.imported = imported;
+    session.importStatus = importStatus;
     eventAddSessions.set(key, session);
     await interaction.reply({
       embeds: [buildRegionSelectionEmbed()],
@@ -3456,7 +3485,15 @@ async function runDiscordBot() {
 
   client.on("interactionCreate", async (interaction) => {
     if (interaction.type === InteractionType.ModalSubmit) {
-      await handleModalSubmit(interaction);
+      try {
+        await handleModalSubmit(interaction);
+      } catch (err) {
+        console.error("Failed to handle modal interaction:", err);
+        await safeReplyInteraction(interaction, {
+          embeds: [new EmbedBuilder().setTitle("Something went wrong.").setColor(0xef4444)],
+          flags: MessageFlags.Ephemeral
+        });
+      }
       return;
     }
 
@@ -3465,17 +3502,15 @@ async function runDiscordBot() {
         await handleComponentInteraction(interaction);
       } catch (err) {
         console.error("Failed to handle component interaction:", err);
-        if (!interaction.replied && !interaction.deferred) {
-          await interaction.reply({
-            embeds: [
-              new EmbedBuilder()
-                .setTitle("Something went wrong handling that action.")
-                .setDescription(`Action: ${interaction.customId}`)
-                .setColor(0xef4444)
-            ],
-            flags: MessageFlags.Ephemeral
-          });
-        }
+        await safeReplyInteraction(interaction, {
+          embeds: [
+            new EmbedBuilder()
+              .setTitle("Something went wrong handling that action.")
+              .setDescription(`Action: ${interaction.customId}`)
+              .setColor(0xef4444)
+          ],
+          flags: MessageFlags.Ephemeral
+        });
       }
       return;
     }
@@ -3485,16 +3520,14 @@ async function runDiscordBot() {
     try {
       const response = await handleSlashCommand(interaction);
       if (response) {
-        await interaction.reply(response);
+        await safeReplyInteraction(interaction, response);
       }
     } catch (err) {
       console.error("Failed to handle interaction:", err);
-      if (!interaction.replied) {
-        await interaction.reply({
-          embeds: [new EmbedBuilder().setTitle("Something went wrong.").setColor(0xef4444)],
-          flags: MessageFlags.Ephemeral
-        });
-      }
+      await safeReplyInteraction(interaction, {
+        embeds: [new EmbedBuilder().setTitle("Something went wrong.").setColor(0xef4444)],
+        flags: MessageFlags.Ephemeral
+      });
     }
   });
 
