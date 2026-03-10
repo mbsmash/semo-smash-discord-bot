@@ -1089,10 +1089,31 @@ async function syncEventsBoard(interaction, data) {
     message = await channel.messages.fetch(eventsStore.boardMessageId).catch(() => null);
   }
 
-  if (message) {
-    await message.edit({ content, embeds });
-  } else {
-    message = await channel.send({ content, embeds });
+  try {
+    if (message) {
+      await message.edit({ content, embeds });
+    } else {
+      message = await channel.send({ content, embeds });
+    }
+  } catch (err) {
+    const code = Number(err?.code);
+    if (code === 50001) {
+      return {
+        ok: false,
+        error: "Discord denied access to the publish channel (Missing Access). Check channel visibility for the bot."
+      };
+    }
+    if (code === 50013) {
+      return {
+        ok: false,
+        error:
+          "Discord denied posting in the publish channel (Missing Permissions). Ensure Send Messages and Embed Links are allowed."
+      };
+    }
+    return {
+      ok: false,
+      error: `Failed to publish events board: ${err?.message ?? "unknown error"}`
+    };
   }
 
   eventsStore.boardMessageId = message.id;
@@ -3502,11 +3523,12 @@ async function runDiscordBot() {
         await handleComponentInteraction(interaction);
       } catch (err) {
         console.error("Failed to handle component interaction:", err);
+        const details = err?.message ? `\n${err.message}` : "";
         await safeReplyInteraction(interaction, {
           embeds: [
             new EmbedBuilder()
               .setTitle("Something went wrong handling that action.")
-              .setDescription(`Action: ${interaction.customId}`)
+              .setDescription(`Action: ${interaction.customId}${details}`)
               .setColor(0xef4444)
           ],
           flags: MessageFlags.Ephemeral
